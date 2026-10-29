@@ -173,6 +173,19 @@ textarea,input[type=text]{width:100%;font:inherit;font-size:16px;padding:8px;bor
 .install .itext b{display:block;font-size:14px}
 .install .ibtn{background:#fff;color:#0b7fc0;border:none;border-radius:999px;padding:7px 14px;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap}
 .install .iclose{background:none;border:none;color:#fff;font-size:20px;line-height:1;padding:4px 2px;cursor:pointer}
+.qrov{position:fixed;inset:0;z-index:15;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px}
+.qrov[hidden]{display:none}
+.qrcard{background:#fff;color:#1d1d1f;border-radius:18px;width:100%;max-width:340px;padding:22px 20px 16px;text-align:center;position:relative;box-shadow:0 10px 40px rgba(0,0,0,.3)}
+.qrcard .qx{position:absolute;top:6px;right:8px;border:none;background:none;font-size:26px;color:#888;cursor:pointer;padding:4px 8px}
+.qrhead{display:flex;align-items:center;justify-content:center;gap:10px}
+.qrhead img{width:52px;height:52px;border-radius:12px}
+.qrhead .qt{text-align:left;font-weight:900;line-height:1.1}
+.qrhead .qt small{display:block;font-size:14px;color:#0b7fc0;letter-spacing:.12em;margin-bottom:2px}
+.qrhead .qt span{font-size:24px;letter-spacing:.04em}
+.qrimg{width:min(240px,70vw);height:auto;aspect-ratio:1;image-rendering:pixelated;display:block;margin:16px auto 6px}
+.qrcap{font-size:12px;color:#666}
+.qrurl{display:block;width:100%;margin-top:12px;border:1px solid #cfd8e3;background:#f2f7fc;color:#0b57d0;border-radius:10px;padding:10px 8px;font:12px/1.4 "DejaVu Sans Mono",ui-monospace,monospace;word-break:break-all;cursor:pointer}
+.qrurl b{display:block;font:700 13px/1.4 system-ui,sans-serif;margin-bottom:2px}
 .toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:#333;color:#fff;padding:8px 16px;border-radius:999px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:20;max-width:90vw}
 .toast.show{opacity:1}
 </style>
@@ -203,6 +216,15 @@ textarea,input[type=text]{width:100%;font:inherit;font-size:16px;padding:8px;bor
   <div class="sheet" role="dialog" aria-modal="true">
     <div class="sheet-head"><h2 id="sheetTitle"></h2><button class="x" id="sheetClose" type="button" aria-label="閉じる">×</button></div>
     <div id="sheetBody"></div>
+  </div>
+</div>
+<div class="qrov" id="qrov" hidden>
+  <div class="qrcard" role="dialog" aria-modal="true" aria-label="アプリを教える">
+    <button class="qx" id="qrClose" type="button" aria-label="閉じる">×</button>
+    <div class="qrhead"><img src="icon-192.png" alt=""><div class="qt"><small>運びや</small><span>稼働予定表</span></div></div>
+    <img class="qrimg" alt="稼働予定表のQRコード" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJQAAACUAQAAAABdRz15AAABMklEQVR42s2Wu40cQQxEHxfnV2ew+Ye1GdRE8GSMDgdIJgeQaLZRIOtD9sifdb34u/7d28wcznVmZs7MnCVelItzYdPorr8vmHCccq4cJk9wkMl5N9eev69bUk85H3IewJMDF2+OB9npMQ7kx3uQzwYPVamYGtXu8AJpoKaBbPGogqYgTZZ4pTFpQpKw7a8qTWLF/bwSSBRB3M37Aj5S5jh4nJ2fsQVKbG265g8rYHpHec1fhGKrNG79knh7mof8F7mJI3bvP1vB+y6VJd6L682k50QT6GG9D5pb4Br3erQ3YqLQB/aVEITygL4htLYoZL1PVRMTQsy6PyAqSUmyzls0+L1Y4QH+8jsluf39wB9p3p/p9UGuvZ+T0FQS6hP89TtseeBeQkhSLXWZj/nP/7u/ANhzBkQkGSyuAAAAAElFTkSuQmCC">
+    <div class="qrcap">相手のスマホのカメラで読み取ってもらってください</div>
+    <button class="qrurl" id="qrUrl" type="button"><b>📤 URLを送る（LINE・メールなど）</b><span id="qrUrlText"></span></button>
   </div>
 </div>
 <div class="toast" id="toast"></div>
@@ -672,7 +694,7 @@ function renderFooter() {
   const f = $('#footer'); f.replaceChildren();
   f.classList.toggle('admin', isAdmin());
   if (!state.user) {
-    f.append(btn('書き出し', 'btn', openExport), el('span', 'grow', ''), btn('管理者ログイン', 'linkbtn', () => store.login().catch(e => toast('ログインできませんでした（' + (e.code || e.message) + '）'))));
+    f.append(btn('書き出し', 'btn', openExport), btn('アプリを教える', 'btn', openShareCard), el('span', 'grow', ''), btn('管理者ログイン', 'linkbtn', () => store.login().catch(e => toast('ログインできませんでした（' + (e.code || e.message) + '）'))));
   } else if (isAdmin()) {
     const ub = btn(`↶ 元に戻す${undoStack.length ? `（${undoStack.length}）` : ''}`, 'btn', undoLast);
     ub.disabled = !undoStack.length;
@@ -683,7 +705,7 @@ function renderFooter() {
       btn('書き出し', 'btn', openExport),
       btn('ログアウト', 'linkbtn', () => store.logout()));
   } else {
-    f.append(btn('書き出し', 'btn', openExport), el('span', 'grow', `${state.user.email} には編集権限がありません`), btn('ログアウト', 'btn', () => store.logout()));
+    f.append(btn('書き出し', 'btn', openExport), btn('アプリを教える', 'btn', openShareCard), el('span', 'grow', `${state.user.email} には編集権限がありません`), btn('ログアウト', 'btn', () => store.logout()));
   }
 }
 
@@ -1257,6 +1279,20 @@ async function deliver(blob, name) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
   document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 30000);
 }
+
+/* ===================== アプリを教える（QRカード） ===================== */
+const APP_URL = 'https://kashi0125.github.io/asc-hakobiya-schedule/';
+function openShareCard() { $('#qrUrlText').textContent = APP_URL; $('#qrov').hidden = false; }
+$('#qrClose').onclick = () => { $('#qrov').hidden = true; };
+$('#qrov').addEventListener('click', e => { if (e.target.id === 'qrov') $('#qrov').hidden = true; });
+$('#qrUrl').onclick = async () => {
+  const data = { title: '運びや 稼働予定表', text: '運びや 稼働予定表（ログイン不要で見られます）', url: APP_URL };
+  if (navigator.share) {
+    try { await navigator.share(data); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  try { await navigator.clipboard.writeText(APP_URL); toast('URLをコピーしました。LINEなどに貼り付けてください'); }
+  catch (e) { prompt('このURLをコピーしてください', APP_URL); }
+};
 
 function openExport() {
   const ym = state.ym, [y, m] = ym.split('-').map(Number), list = staff();
