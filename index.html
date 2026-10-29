@@ -1,0 +1,1054 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>稼働予定表</title>
+<style>
+:root{
+  --bg:#f6f4f1;--surface:#fff;--text:#1d1d1f;--muted:#6b6b70;--line:#d4d1cc;--accent:#0b7fc0;
+  /* Excelの条件付き書式と同じ色 */
+  --work-bg:#00b0f0;--work-tx:#062a3a;   /* 北大阪 */
+  --east-bg:#ffff00;--east-tx:#333;      /* 東大阪：黄 */
+  --west-bg:#00b050;--west-tx:#fff;      /* 西大阪：緑 */
+  --yodo-bg:#ff0000;--yodo-tx:#fff;      /* 淀川：赤 */
+  --raku-bg:#7030a0;--raku-tx:#fff;      /* 楽天 */
+  --free-bg:#00b050;--free-tx:#fff;      /* フリー */
+  --off-bg:#fbe4d5;--off-tx:#5b2a12;     /* 休 */
+  --sat-bg:#deeaf6;--sun-bg:#fbe4d5;--today:#ff7a00;
+  --memo-bg:#fffbea;--demo-bg:#fff3cd;--demo-tx:#5c4400;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#151517;--surface:#1f1f22;--text:#ececef;--muted:#9a9aa2;--line:#3a3a40;--accent:#3aa6e6;
+  --work-bg:#11739c;--work-tx:#eaf8ff;--east-bg:#8d8a00;--east-tx:#fffde0;
+  --west-bg:#13804a;--west-tx:#fff;--yodo-bg:#b3261e;--yodo-tx:#fff;
+  --raku-bg:#5a2a82;--raku-tx:#fff;--free-bg:#13804a;--free-tx:#fff;
+  --off-bg:#5a3a2b;--off-tx:#ffe6d6;
+  --sat-bg:#1c2a44;--sun-bg:#4a2e22;--memo-bg:#2b2818;--demo-bg:#4a3c10;--demo-tx:#ffe9a8;
+}}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;display:flex;flex-direction:column;height:100dvh}
+button{font:inherit;color:inherit}
+header{padding:10px 12px 8px;background:var(--surface);border-bottom:1px solid var(--line)}
+.title-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+h1{font-size:18px;margin:0}
+.updated{font-size:12px;color:var(--muted)}
+.nav{display:flex;align-items:center;gap:6px;margin-top:8px}
+.nav .ym{font-size:17px;font-weight:700;min-width:7.2em;text-align:center}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:6px 12px;min-height:36px;cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.danger{color:#d23b3b}
+.notice{margin:8px 0 0;font-size:13px;white-space:pre-wrap}
+.notice:empty{display:none}
+.notice.editable{cursor:pointer;border:1px dashed var(--line);border-radius:8px;padding:6px 8px}
+.notice.editable::after{content:"✎ 編集（全月共通）";display:block;font-size:11px;color:var(--muted);margin-top:2px}
+.demo{background:var(--demo-bg);color:var(--demo-tx);font-size:12px;padding:6px 12px}
+.wrap{flex:1;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch}
+table{border-collapse:separate;border-spacing:0;font-size:13px;min-width:100%}
+th,td{border-right:1px solid var(--line);border-bottom:1px solid var(--line);text-align:center;padding:0;background:var(--surface)}
+thead th{position:sticky;top:0;z-index:2;font-weight:600;min-height:34px;padding:6px 4px;white-space:pre-line;line-height:1.25;font-size:12.5px}
+thead tr.count th{font-weight:500;font-size:12px;color:var(--muted);padding:4px}
+.date{position:sticky;left:0;z-index:1;width:48px;min-width:48px}
+thead .date{z-index:3}
+td.cell{min-width:72px;width:72px;height:46px;line-height:1.2;padding:2px}
+td.note{min-width:160px;text-align:left;padding:2px 8px;font-size:12px;white-space:pre-wrap}
+td.memo,th.memo{min-width:70px;background:var(--memo-bg);font-size:12px;white-space:pre-wrap}
+.cell .l1{display:block}
+.cell .l2{display:block;font-size:11px}
+.k-work{background:var(--work-bg);color:var(--work-tx)}
+.k-east{background:var(--east-bg);color:var(--east-tx)}
+.k-west{background:var(--west-bg);color:var(--west-tx)}
+.k-yodo{background:var(--yodo-bg);color:var(--yodo-tx)}
+.k-raku{background:var(--raku-bg);color:var(--raku-tx)}
+.k-free{background:var(--free-bg);color:var(--free-tx)}
+.k-off{background:var(--off-bg);color:var(--off-tx)}
+.k-ng{color:var(--muted)}
+.date .d{display:block;font-weight:700;font-size:15px}
+.date .w{font-size:11px}
+tr.sat .date{background:var(--sat-bg)}
+tr.sun .date{background:var(--sun-bg)}
+tr.today .date{box-shadow:inset 4px 0 0 var(--today)}
+.editable td.cell,.editable td.note,.editable td.memo{cursor:pointer}
+.editable td.cell:active,.editable td.note:active,.editable td.memo:active{filter:brightness(.9)}
+.tabs{display:flex;gap:6px;overflow-x:auto;margin-top:8px;padding-bottom:2px;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:0 0 auto;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 12px;min-height:34px;font-size:13px;cursor:pointer;white-space:nowrap}
+.tab.on{background:var(--text);color:var(--surface);border-color:var(--text);font-weight:700}
+.pwrap{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;padding:8px 8px 6px}
+.pwrap[hidden],.wrap[hidden]{display:none}
+.phead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 4px 6px}
+.pmonth{font-size:26px;font-weight:800;line-height:1.05}
+.pmonth small{font-size:13px;font-weight:600;color:var(--muted);margin-right:4px}
+.pname{font-size:18px;font-weight:700;color:var(--accent);line-height:1.2}
+.pbadge{background:var(--off-bg);color:var(--off-tx);border-radius:10px;padding:4px 14px;text-align:center;font-size:12px;line-height:1.2}
+.pbadge b{display:block;font-size:20px}
+.cal{flex:1;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.cal .wd{text-align:center;font-size:12px;font-weight:700;padding:2px 0}
+.cal .wd.su{color:#d32f2f}.cal .wd.sa{color:#1f57c3}
+.pc{border-radius:8px;padding:3px 3px 4px;min-height:54px;display:flex;flex-direction:column;gap:1px;border:1px solid var(--line);overflow:hidden;min-width:0}
+.pc:not([class*="k-"]){background:var(--surface)}
+.pc.blank{background:none;border:none}
+.pc[class*="k-"]{border-color:transparent}
+.pc .pd{font-weight:700;font-size:14px;line-height:1.1}
+.pc .pd small{font-size:9px;font-weight:600;margin-left:2px}
+.pc.su .pd{color:#d32f2f}.pc.sa .pd{color:#1f57c3}
+.pc[class*="k-"] .pd{color:inherit}
+.pc .pt{flex:1;display:flex;flex-direction:column;justify-content:center;gap:1px;padding-bottom:6px}
+.pc .p1{font-size:12px;font-weight:700;line-height:1.15;text-align:center;word-break:break-all}
+.pc .p2{font-size:10px;line-height:1.15;text-align:center;word-break:break-all}
+.pc.today{outline:3px solid var(--today);outline-offset:-1px}
+.editable .pc:not(.blank){cursor:pointer}
+.plegend{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;font-size:12px;margin:8px 4px 0;color:var(--text)}
+.plegend .sw{display:inline-block;width:14px;height:14px;border-radius:4px;vertical-align:-2px;margin-right:4px}
+.plegend .sum{margin-left:auto;color:var(--muted)}
+.pempty{margin:24px 8px;color:var(--muted);text-align:center;font-size:14px}
+footer{padding:8px 12px calc(8px + env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--line);display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+footer .grow{flex:1}
+footer.admin{flex-wrap:nowrap;overflow-x:auto;gap:4px;padding-left:8px;padding-right:8px}
+footer .btn{padding:6px 8px;font-size:13px;flex:0 0 auto;white-space:nowrap}
+footer .linkbtn{flex:0 0 auto;white-space:nowrap;font-size:12px}
+.btn:disabled{opacity:.4;cursor:default}
+.linkbtn{background:none;border:none;color:var(--muted);text-decoration:underline;padding:6px 0;cursor:pointer}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;z-index:10}
+.overlay[hidden]{display:none}
+.sheet{background:var(--surface);width:100%;max-width:520px;border-radius:16px 16px 0 0;padding:14px 16px calc(16px + env(safe-area-inset-bottom));max-height:88dvh;overflow:auto}
+.sheet-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.sheet-head h2{font-size:16px;margin:0;white-space:pre-line}
+.x{border:none;background:none;font-size:22px;line-height:1;padding:4px 8px;cursor:pointer;color:var(--muted)}
+.chips{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
+.chip{border:1px solid var(--line);border-radius:10px;padding:8px 6px;min-height:46px;font-size:14px;cursor:pointer;line-height:1.2}
+.chip:not([class*="k-"]){background:var(--surface)}
+.chip small{display:block;font-size:11px}
+.chip.sel{outline:3px solid var(--text);outline-offset:1px;font-weight:700}
+.chip.sel::before{content:"✓ "}
+label.lbl{display:block;font-size:12px;color:var(--muted);margin:4px 0}
+textarea,input[type=text]{width:100%;font:inherit;font-size:16px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text)}
+.actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+.actions .grow{flex:1}
+.mrow{display:flex;gap:6px;margin-bottom:6px}
+.mrow input{flex:1;min-width:0}
+.mrow .btn{padding:6px 10px}
+.saverow{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.saverow .btn{min-height:44px;line-height:1.25}
+.bsec{font-size:13px;font-weight:700;margin:14px 0 6px}
+.bsec:first-child{margin-top:0}
+.pick{display:flex;flex-wrap:wrap;gap:6px}
+.pick .tab{min-height:36px}
+.quick{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.quick .btn{min-height:32px;padding:4px 10px;font-size:13px}
+.mcal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px}
+.mcal .wd{text-align:center;font-size:11px;font-weight:700}
+.mcal .wd.su{color:#d32f2f}.mcal .wd.sa{color:#1f57c3}
+.md{border:1px solid var(--line);border-radius:6px;background:var(--surface);min-height:36px;font-size:13px;cursor:pointer;padding:0}
+.md.su{color:#d32f2f}.md.sa{color:#1f57c3}
+.md.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700}
+.md.blank{visibility:hidden}
+.radio{display:flex;flex-direction:column;gap:6px}
+.radio label{display:flex;align-items:center;gap:8px;font-size:14px;border:1px solid var(--line);border-radius:8px;padding:8px}
+.sticky-actions{position:sticky;bottom:calc(-16px - env(safe-area-inset-bottom));background:var(--surface);padding:10px 0 4px;margin-top:8px}
+.hint{font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.5}
+.checks{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:10px 0}
+.checks label{display:flex;align-items:center;gap:5px;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:7px 6px;white-space:nowrap}
+.checks{max-height:45dvh;overflow:auto}
+.toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:#333;color:#fff;padding:8px 16px;border-radius:999px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:20;max-width:90vw}
+.toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div id="demo" class="demo" hidden>デモモード（Firebase未設定）：データはこの端末の中だけに保存されます。</div>
+<header>
+  <div class="title-row"><h1 id="title">稼働予定表</h1><span id="updated" class="updated"></span></div>
+  <div class="nav">
+    <button class="btn" id="prev" type="button" aria-label="前の月">‹</button>
+    <span class="ym" id="ym"></span>
+    <button class="btn" id="next" type="button" aria-label="次の月">›</button>
+    <button class="btn" id="thisMonth" type="button">今月</button>
+  </div>
+  <div class="tabs" id="tabs" role="tablist" aria-label="表示の切り替え"></div>
+  <p class="notice" id="notice"></p>
+</header>
+<div class="wrap" id="wrap"><table id="grid"></table></div>
+<div class="pwrap" id="pwrap" hidden></div>
+<footer id="footer"></footer>
+<div class="overlay" id="overlay" hidden>
+  <div class="sheet" role="dialog" aria-modal="true">
+    <div class="sheet-head"><h2 id="sheetTitle"></h2><button class="x" id="sheetClose" type="button" aria-label="閉じる">×</button></div>
+    <div id="sheetBody"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+/* ===================== 設定 ===================== */
+const APP_TITLE = '稼働予定表';
+
+// Firebaseコンソール →「プロジェクトの設定」→「マイアプリ」の値を貼り付け。
+// apiKey が空のままだと「デモモード」（端末内保存）で動きます。
+const firebaseConfig = {
+  apiKey: "AIzaSyC6A5UQHrcMLJU12Wx-ML_5zhtYjwWAOKA",
+  authDomain: "asc-hakobiya-schedule.firebaseapp.com",
+  projectId: "asc-hakobiya-schedule",
+  storageBucket: "asc-hakobiya-schedule.firebasestorage.app",
+  messagingSenderId: "59703532798",
+  appId: "1:59703532798:web:5520b3fe43f5c7de3e99af"
+};
+
+// 編集できる管理者のGoogleアカウント（firestore.rules にも同じものを書く）
+const ADMIN_EMAILS = ["kashi0125@gmail.com"];
+
+// 色分け（Excelの条件付き書式と同じ。上にあるものが優先）
+const COLOR_RULES = [
+  ['東大阪', 'k-east'], ['休', 'k-off'],
+  ['西大阪', 'k-west'], ['淀川', 'k-yodo'], ['北大阪', 'k-work'],
+];
+
+// 入力ボタン（2行目の自由メモは入力画面で手入力）
+const PRESETS = ['北大阪', '淀川', '西大阪', '東大阪', '休み', '希望休'];
+
+const DEFAULT_SETTINGS = {
+  notice: '',
+  staff: [
+    { id: 's1', name: '川岸' },
+    { id: 's2', name: '宮本(雅)' },
+    { id: 's3', name: '麻田' },
+    { id: 's4', name: 'ヘルプ' },
+  ],
+};
+
+/* ===================== 共通 ===================== */
+const $ = s => document.querySelector(s);
+const pad = n => String(n).padStart(2, '0');
+const WD = ['日','月','火','水','木','金','土'];
+const DEL = Symbol('delete');
+const ymOf = d => d.getFullYear() + '-' + pad(d.getMonth() + 1);
+const shiftYm = (ym, delta) => { const [y, m] = ym.split('-').map(Number); return ymOf(new Date(y, m - 1 + delta, 1)); };
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function btn(text, cls, onclick) { const b = el('button', cls || 'btn', text); b.type = 'button'; b.onclick = onclick; return b; }
+
+function colorClass(v) {
+  if (!v) return '';
+  for (const [kw, cls] of COLOR_RULES) if (v.includes(kw)) return cls;
+  return /不可/.test(v) ? 'k-ng' : '';
+}
+const isOff = v => !!v && v.includes('休');   // Excelの COUNTIF(…,"*休*") と同じ数え方
+
+function fillCell(node, v) {
+  node.replaceChildren();
+  if (!v) return;
+  const [first, ...rest] = String(v).split('\n');
+  node.append(el('span', 'l1', first));
+  if (rest.length) node.append(el('span', 'l2', rest.join(' ')));
+}
+
+let toastTimer;
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+/* ===================== データ保存（Firebase） =====================
+   settings/main   … お知らせ・標準メンバー（誰でも読める）
+   months/{YYYY-MM} … その月のメンバー・予定・備考（誰でも読める）
+   memos/{YYYY-MM}  … 管理者メモ（管理者だけ読める）                */
+async function createFirebaseStore() {
+  const V = '10.12.2';
+  const [{ initializeApp }, fs, au] = await Promise.all([
+    import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`),
+    import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`),
+    import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`),
+  ]);
+  const app = initializeApp(firebaseConfig);
+  const db = fs.getFirestore(app);
+  const auth = au.getAuth(app);
+  const onErr = e => { console.error(e); toast('読み込めませんでした'); };
+  const conv = patch => {
+    const o = {};
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === DEL) o[k] = fs.deleteField();
+      else if (v && typeof v === 'object' && !Array.isArray(v)) o[k] = conv(v);
+      else o[k] = v;
+    }
+    return o;
+  };
+  return {
+    subscribeSettings: cb => fs.onSnapshot(fs.doc(db, 'settings', 'main'), s => cb(s.exists() ? s.data() : null), onErr),
+    subscribeMonth: (ym, cb) => fs.onSnapshot(fs.doc(db, 'months', ym), s => {
+      const d = s.exists() ? s.data({ serverTimestamps: 'estimate' }) : {};
+      if (d.updatedAt && d.updatedAt.toMillis) d.updatedAt = d.updatedAt.toMillis();
+      cb(d);
+    }, onErr),
+    subscribeMemo: (ym, cb) => fs.onSnapshot(fs.doc(db, 'memos', ym), s => cb(s.exists() ? s.data() : {}), e => console.error(e)),
+    updateMonth: (ym, patch) => fs.setDoc(fs.doc(db, 'months', ym), { ...conv(patch), updatedAt: fs.serverTimestamp() }, { merge: true }),
+    updateMemo: (ym, patch) => fs.setDoc(fs.doc(db, 'memos', ym), conv(patch), { merge: true }),
+    saveSettings: patch => fs.setDoc(fs.doc(db, 'settings', 'main'), patch, { merge: true }),
+    // ym 以降の入力済みの月すべてと、標準メンバー（未入力の月用）を更新
+    async applyStaffFrom(ym, staffList) {
+      const snap = await fs.getDocs(fs.query(fs.collection(db, 'months'), fs.where(fs.documentId(), '>', ym)));
+      const setSnap = await fs.getDoc(fs.doc(db, 'settings', 'main'));
+      const before = {};
+      snap.forEach(d => { before[d.id] = d.data().staff || null; });
+      const settingsBefore = (setSnap.exists() && setSnap.data().staff) || null;
+      const b = fs.writeBatch(db);
+      b.set(fs.doc(db, 'months', ym), { staff: staffList, updatedAt: fs.serverTimestamp() }, { merge: true });
+      snap.forEach(d => b.set(d.ref, { staff: staffList, updatedAt: fs.serverTimestamp() }, { merge: true }));
+      b.set(fs.doc(db, 'settings', 'main'), { staff: staffList }, { merge: true });
+      await b.commit();
+      return { count: 1 + snap.size, before, settingsBefore };
+    },
+    async restoreStaff(before, settingsBefore) {
+      const b = fs.writeBatch(db);
+      for (const [k, v] of Object.entries(before))
+        b.set(fs.doc(db, 'months', k), { staff: v || fs.deleteField(), updatedAt: fs.serverTimestamp() }, { merge: true });
+      b.set(fs.doc(db, 'settings', 'main'), { staff: settingsBefore || fs.deleteField() }, { merge: true });
+      await b.commit();
+    },
+    async importMonths(months) {
+      const b = fs.writeBatch(db);
+      for (const [ym, m] of Object.entries(months)) {
+        b.set(fs.doc(db, 'months', ym), { staff: m.staff, cells: m.cells || {}, notes: m.notes || {}, updatedAt: fs.serverTimestamp() });
+        b.set(fs.doc(db, 'memos', ym), { memos: m.memos || {} });
+      }
+      await b.commit();
+    },
+    onAuth: cb => au.onAuthStateChanged(auth, u => cb(u ? { email: u.email || '' } : null)),
+    async login() {
+      const provider = new au.GoogleAuthProvider();
+      try { await au.signInWithPopup(auth, provider); }
+      catch (e) {
+        if (e.code === 'auth/popup-blocked') return au.signInWithRedirect(auth, provider);
+        if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') throw e;
+      }
+    },
+    logout: () => au.signOut(auth),
+  };
+}
+
+/* ===================== データ保存（デモ） ===================== */
+function demoSeed() {
+  const now = new Date(); const days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const cells = {}, notes = {};
+  for (let d = 1; d <= days; d++) {
+    cells[`${d}_s1`] = d % 7 === 3 ? '休み' : '北大阪';
+    cells[`${d}_s2`] = d % 7 === 5 ? '休み' : (d % 9 === 0 ? '北大阪\nアマ後半' : '北大阪');
+  }
+  cells['2_s1'] = '休み\n(予定有)'; cells['4_s3'] = '北大阪'; cells['6_s4'] = '東大阪';
+  cells['8_s4'] = 'ヘルプ\n不可'; notes['8'] = '人手不足→麻田さん出勤';
+  return { cells, notes, updatedAt: Date.now() };
+}
+function applyPatch(target, patch) {
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === DEL) delete target[k];
+    else if (v && typeof v === 'object' && !Array.isArray(v)) {
+      if (!target[k] || typeof target[k] !== 'object') target[k] = {};
+      applyPatch(target[k], v);
+    } else target[k] = structuredClone(v);
+  }
+}
+function createDemoStore() {
+  const KEY = 'shift-demo-v3';
+  let data = null;
+  try { data = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) {}
+  if (!data) data = { settings: structuredClone(DEFAULT_SETTINGS), months: { [ymOf(new Date())]: demoSeed() }, memos: {} };
+  const sSubs = new Set(), mSubs = new Set(), memoSubs = new Set(), aSubs = new Set();
+  let user = null;
+  const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {} };
+  const emitMonth = ym => mSubs.forEach(s => { if (s.ym === ym) s.cb(structuredClone(data.months[ym] || {})); });
+  const emitMemo = ym => memoSubs.forEach(s => { if (s.ym === ym) s.cb(structuredClone(data.memos[ym] || {})); });
+  const sub = (set, ym, cb, src) => { const s = { ym, cb }; set.add(s); cb(structuredClone(src[ym] || {})); return () => set.delete(s); };
+  return {
+    demo: true,
+    subscribeSettings(cb) { sSubs.add(cb); cb(structuredClone(data.settings)); return () => sSubs.delete(cb); },
+    subscribeMonth: (ym, cb) => sub(mSubs, ym, cb, data.months),
+    subscribeMemo: (ym, cb) => sub(memoSubs, ym, cb, data.memos),
+    async updateMonth(ym, patch) { data.months[ym] = data.months[ym] || {}; applyPatch(data.months[ym], patch); data.months[ym].updatedAt = Date.now(); persist(); emitMonth(ym); },
+    async updateMemo(ym, patch) { data.memos[ym] = data.memos[ym] || {}; applyPatch(data.memos[ym], patch); persist(); emitMemo(ym); },
+    async saveSettings(patch) { Object.assign(data.settings, structuredClone(patch)); persist(); sSubs.forEach(cb => cb(structuredClone(data.settings))); },
+    async applyStaffFrom(ym, staffList) {
+      const targets = [ym, ...Object.keys(data.months).filter(k => k > ym)];
+      const before = {}; targets.forEach(k => { before[k] = (data.months[k] && data.months[k].staff) || null; });
+      const settingsBefore = data.settings.staff || null;
+      targets.forEach(k => { data.months[k] = data.months[k] || {}; data.months[k].staff = structuredClone(staffList); data.months[k].updatedAt = Date.now(); });
+      data.settings.staff = structuredClone(staffList);
+      persist(); targets.forEach(emitMonth); sSubs.forEach(cb => cb(structuredClone(data.settings)));
+      return { count: targets.length, before, settingsBefore };
+    },
+    async restoreStaff(before, settingsBefore) {
+      for (const [k, v] of Object.entries(before)) {
+        data.months[k] = data.months[k] || {};
+        if (v) data.months[k].staff = structuredClone(v); else delete data.months[k].staff;
+        data.months[k].updatedAt = Date.now(); emitMonth(k);
+      }
+      if (settingsBefore) data.settings.staff = structuredClone(settingsBefore); else delete data.settings.staff;
+      persist(); sSubs.forEach(cb => cb(structuredClone(data.settings)));
+    },
+    async importMonths(months) {
+      for (const [ym, m] of Object.entries(months)) {
+        data.months[ym] = { staff: m.staff, cells: m.cells || {}, notes: m.notes || {}, updatedAt: Date.now() };
+        data.memos[ym] = { memos: m.memos || {} };
+        emitMonth(ym); emitMemo(ym);
+      }
+      persist();
+    },
+    onAuth(cb) { aSubs.add(cb); cb(user); },
+    async login() { user = { email: ADMIN_EMAILS[0] }; aSubs.forEach(cb => cb(user)); },
+    async logout() { user = null; aSubs.forEach(cb => cb(user)); },
+  };
+}
+
+/* ===================== 画面 ===================== */
+// URL：#2026-10（一覧） / #2026-10/s1（個人カレンダー）
+const hashM = location.hash.match(/^#(\d{4}-\d{2})(?:\/([\w-]+))?$/);
+const state = {
+  ym: hashM ? hashM[1] : ymOf(new Date()),
+  person: hashM && hashM[2] ? hashM[2] : '', personName: '',
+  settings: DEFAULT_SETTINGS, month: {}, memos: {}, user: null,
+};
+
+/* ===================== 祝日（アプリ内で計算。通信不要） =====================
+   現行の祝日法にもとづく（2022年以降が対象）。振替休日・国民の休日も含む。
+   法改正や臨時の祝日があったときは EXTRA_HOLIDAYS に追加してください。 */
+const EXTRA_HOLIDAYS = { /* '2027-05-01': '臨時の祝日' */ };
+const holidayCache = {};
+function holidaysOfYear(y) {
+  if (holidayCache[y]) return holidayCache[y];
+  const h = {};
+  const key = (m, d) => `${m}-${d}`;
+  const nthMonday = (m, n) => { const first = new Date(y, m - 1, 1).getDay(); return 1 + ((8 - first) % 7) + (n - 1) * 7; };
+  const t = y - 1980;
+  const shunbun = Math.floor(20.8431 + 0.242194 * t - Math.floor(t / 4));
+  const shubun = Math.floor(23.2488 + 0.242194 * t - Math.floor(t / 4));
+  [
+    [1, 1, '元日'], [1, nthMonday(1, 2), '成人の日'], [2, 11, '建国記念の日'], [2, 23, '天皇誕生日'],
+    [3, shunbun, '春分の日'], [4, 29, '昭和の日'], [5, 3, '憲法記念日'], [5, 4, 'みどりの日'],
+    [5, 5, 'こどもの日'], [7, nthMonday(7, 3), '海の日'], [8, 11, '山の日'], [9, nthMonday(9, 3), '敬老の日'],
+    [9, shubun, '秋分の日'], [10, nthMonday(10, 2), 'スポーツの日'], [11, 3, '文化の日'], [11, 23, '勤労感謝の日'],
+  ].forEach(([m, d, n]) => { h[key(m, d)] = n; });
+  const base = Object.keys(h).map(k => k.split('-').map(Number));
+  // 国民の休日：祝日にはさまれた平日
+  for (const [m, d] of base) {
+    const next = new Date(y, m - 1, d + 1), after = new Date(y, m - 1, d + 2);
+    const k1 = key(next.getMonth() + 1, next.getDate()), k2 = key(after.getMonth() + 1, after.getDate());
+    if (!h[k1] && h[k2] && next.getDay() !== 0 && after.getFullYear() === y) h[k1] = '国民の休日';
+  }
+  // 振替休日：祝日が日曜なら、その後の最初の祝日でない日
+  for (const [m, d] of base) {
+    if (new Date(y, m - 1, d).getDay() !== 0) continue;
+    const dt = new Date(y, m - 1, d + 1);
+    while (h[key(dt.getMonth() + 1, dt.getDate())]) dt.setDate(dt.getDate() + 1);
+    if (dt.getFullYear() === y) h[key(dt.getMonth() + 1, dt.getDate())] = '振替休日';
+  }
+  return (holidayCache[y] = h);
+}
+function holidayName(y, m, d) {
+  return EXTRA_HOLIDAYS[`${y}-${pad(m)}-${pad(d)}`] || holidaysOfYear(y)[`${m}-${d}`] || '';
+}
+let store, unsubMonth = null, unsubMemo = null, scrolledFor = null;
+
+const isAdmin = () => !!state.user && ADMIN_EMAILS.map(e => e.toLowerCase()).includes((state.user.email || '').toLowerCase());
+// その月にメンバーが保存されていればそれを使い、なければ標準メンバー
+const staff = () => {
+  const m = state.month.staff, s = state.settings.staff;
+  return (m && m.length) ? m : (s && s.length) ? s : DEFAULT_SETTINGS.staff;
+};
+
+function render() {
+  renderHeader(); renderTabs();
+  const p = personNow();
+  $('#wrap').hidden = !!state.person;
+  $('#pwrap').hidden = !state.person;
+  if (state.person) renderPerson(p); else renderTable();
+  renderFooter();
+}
+
+// 表示中の個人（月によってメンバーが違うときは名前で探す）
+function personNow() {
+  if (!state.person) return null;
+  const list = staff();
+  let p = list.find(s => s.id === state.person);
+  if (!p && state.personName) p = list.find(s => s.name === state.personName);
+  if (p) state.personName = p.name;
+  return p || null;
+}
+function setHash() {
+  try { history.replaceState(null, '', '#' + state.ym + (state.person ? '/' + state.person : '')); } catch (e) {}
+}
+function showPerson(id) {
+  state.person = id;
+  const p = staff().find(s => s.id === id);
+  state.personName = p ? p.name : '';
+  setHash(); render();
+  if (!id) { scrolledFor = null; scrollToTodayOnce(); }
+}
+
+function renderTabs() {
+  const box = $('#tabs'); box.replaceChildren();
+  const all = btn('全員の表', 'tab' + (state.person ? '' : ' on'), () => showPerson(''));
+  box.append(all);
+  const cur = personNow();
+  staff().forEach(s => {
+    const on = cur && cur.id === s.id;
+    const t = btn(s.name.replace(/\n/g, ' '), 'tab' + (on ? ' on' : ''), () => showPerson(s.id));
+    box.append(t);
+  });
+}
+
+function renderPerson(p) {
+  const box = $('#pwrap'); box.replaceChildren();
+  box.classList.toggle('editable', isAdmin());
+  const [y, m] = state.ym.split('-').map(Number);
+  if (!p) {
+    box.append(el('p', 'pempty', `${m}月の表に「${(state.personName || '').replace(/\n/g, ' ')}」はいません。上のボタンから選んでください。`));
+    return;
+  }
+  const days = new Date(y, m, 0).getDate();
+  const cells = state.month.cells || {};
+  const now = new Date();
+  const todayKey = ymOf(now) === state.ym ? now.getDate() : -1;
+  let off = 0, work = 0; const used = new Map();
+  for (let d = 1; d <= days; d++) {
+    const v = cells[`${d}_${p.id}`];
+    if (!v) continue;
+    if (isOff(v)) off++; else work++;
+    const k = colorClass(v);
+    if (k && !used.has(k)) used.set(k, isOff(v) ? '休み' : v.split('\n')[0]);
+  }
+
+  const head = el('div', 'phead');
+  const badge = el('div', 'pbadge'); badge.append('休み', el('b', '', `${off}日`));
+  const title = el('div');
+  const mo = el('div', 'pmonth'); mo.append(el('small', '', `${y}年`), `${m}月`);
+  title.append(mo, el('div', 'pname', p.name.replace(/\n/g, ' ')));
+  head.append(title, badge);
+
+  const cal = el('div', 'cal');
+  const first = new Date(y, m - 1, 1).getDay();
+  const weeks = Math.ceil((first + days) / 7);
+  cal.style.gridTemplateRows = `auto repeat(${weeks}, minmax(54px, 1fr))`;
+  WD.forEach((w, i) => cal.append(el('div', 'wd' + (i === 0 ? ' su' : i === 6 ? ' sa' : ''), w)));
+  for (let i = 0; i < first; i++) cal.append(el('div', 'pc blank'));
+  for (let d = 1; d <= days; d++) {
+    const v = cells[`${d}_${p.id}`] || '';
+    const w = new Date(y, m - 1, d).getDay();
+    const hol = holidayName(y, m, d);
+    const c = el('div', ['pc', colorClass(v), (w === 0 || hol) ? 'su' : w === 6 ? 'sa' : '', d === todayKey ? 'today' : ''].filter(Boolean).join(' '));
+    c.dataset.day = d;
+    const dn = el('div', 'pd', String(d));
+    if (hol) { dn.append(el('small', '', hol.includes('振替') ? '振' : '祝')); c.title = hol; }
+    const [l1, ...l2] = v.split('\n');
+    const pt = el('div', 'pt');
+    if (l1) pt.append(el('div', 'p1', l1));
+    if (l2.length) pt.append(el('div', 'p2', l2.join(' ')));
+    c.append(dn, pt);
+    cal.append(c);
+  }
+
+  const leg = el('div', 'plegend');
+  used.forEach((label, k) => { const i = el('span'); i.append(el('span', 'sw ' + k), label); leg.append(i); });
+  leg.append(el('span', 'sum', `出勤 ${work}日 / 休み ${off}日`));
+  box.append(head, cal, leg);
+}
+
+function renderHeader() {
+  const [y, m] = state.ym.split('-').map(Number);
+  $('#title').textContent = APP_TITLE;
+  document.title = APP_TITLE;
+  $('#ym').textContent = `${y}年${m}月`;
+  const nt = $('#notice'), admin = isAdmin();
+  nt.textContent = state.settings.notice || (admin ? '（お知らせなし：タップして入力）' : '');
+  nt.classList.toggle('editable', admin);
+  nt.title = admin ? 'タップして編集（全月共通）' : '';
+  const u = state.month.updatedAt;
+  if (u) { const d = new Date(u); $('#updated').textContent = `最終更新 ${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+  else $('#updated').textContent = '';
+}
+
+function renderTable() {
+  const [y, m] = state.ym.split('-').map(Number);
+  const days = new Date(y, m, 0).getDate();
+  const cells = state.month.cells || {}, notes = state.month.notes || {};
+  const memos = state.memos || {};
+  const list = staff();
+  const admin = isAdmin();
+  const now = new Date();
+  const todayKey = ymOf(now) === state.ym ? now.getDate() : -1;
+
+  const thead = el('thead');
+  const h1 = el('tr');
+  h1.append(el('th', 'date', `${m}月`));
+  list.forEach(s => h1.append(el('th', '', s.name)));
+  h1.append(el('th', '', '備考'));
+  if (admin) h1.append(el('th', 'memo', 'メモ\n(管理者)'));
+  const h2 = el('tr', 'count');
+  h2.append(el('th', 'date', '休み'));
+  list.forEach(s => {
+    let c = 0;
+    for (let d = 1; d <= days; d++) if (isOff(cells[`${d}_${s.id}`])) c++;
+    h2.append(el('th', '', String(c)));
+  });
+  h2.append(el('th', '', ''));
+  if (admin) h2.append(el('th', 'memo', ''));
+  thead.append(h1, h2);
+
+  const tbody = el('tbody');
+  for (let d = 1; d <= days; d++) {
+    const w = new Date(y, m - 1, d).getDay();
+    const hol = holidayName(y, m, d);
+    const tr = el('tr');
+    if (w === 6 && !hol) tr.classList.add('sat');
+    if (w === 0 || hol) tr.classList.add('sun');
+    if (d === todayKey) tr.classList.add('today');
+    const dc = el('td', 'date');
+    dc.append(el('span', 'd', String(d)), el('span', 'w', hol ? (hol.includes('振替') ? '振' : '祝') : WD[w]));
+    if (hol) dc.title = hol;
+    tr.append(dc);
+    list.forEach(s => {
+      const v = cells[`${d}_${s.id}`];
+      const td = el('td', ('cell ' + colorClass(v)).trim());
+      td.dataset.day = d; td.dataset.staff = s.id;
+      fillCell(td, v);
+      tr.append(td);
+    });
+    const nt = el('td', 'note', notes[d] || '');
+    nt.dataset.day = d;
+    tr.append(nt);
+    if (admin) { const mt = el('td', 'memo', memos[d] || ''); mt.dataset.day = d; tr.append(mt); }
+    tbody.append(tr);
+  }
+  $('#grid').replaceChildren(thead, tbody);
+  // 2段目の見出し（休み日数）を1段目の下に固定
+  const top = h1.offsetHeight + 'px';
+  h2.querySelectorAll('th').forEach(th => { th.style.top = top; });
+  $('#wrap').classList.toggle('editable', admin);
+}
+
+function scrollToTodayOnce() {
+  if (scrolledFor === state.ym) return;
+  scrolledFor = state.ym;
+  const wrap = $('#wrap');
+  const row = $('#grid tr.today');
+  if (!row) { wrap.scrollTop = 0; return; }
+  const headH = $('#grid thead').offsetHeight;
+  wrap.scrollTop = Math.max(0, row.offsetTop - headH - 46 * 2);
+}
+
+function renderFooter() {
+  const f = $('#footer'); f.replaceChildren();
+  f.classList.toggle('admin', isAdmin());
+  if (!state.user) {
+    f.append(el('span', 'grow', ''), btn('管理者ログイン', 'linkbtn', () => store.login().catch(e => toast('ログインできませんでした（' + (e.code || e.message) + '）'))));
+  } else if (isAdmin()) {
+    const ub = btn(`↶ 元に戻す${undoStack.length ? `（${undoStack.length}）` : ''}`, 'btn', undoLast);
+    ub.disabled = !undoStack.length;
+    if (undoStack.length) ub.title = '直前の変更を取り消す：' + undoStack[undoStack.length - 1].label;
+    f.append(ub, el('span', 'grow', ''),
+      btn('一括入力', 'btn primary', openBulkEditor),
+      btn('メンバー', 'btn', openMembersEditor),
+      btn('取込', 'btn', openImport),
+      btn('ログアウト', 'linkbtn', () => store.logout()));
+  } else {
+    f.append(el('span', 'grow', `${state.user.email} には編集権限がありません`), btn('ログアウト', 'btn', () => store.logout()));
+  }
+}
+
+/* ===================== 入力シート ===================== */
+function openSheet(title, build) {
+  $('#sheetTitle').textContent = title;
+  const body = $('#sheetBody'); body.replaceChildren();
+  const close = () => { $('#overlay').hidden = true; };
+  build(body, close);
+  $('#overlay').hidden = false;
+}
+$('#sheetClose').onclick = () => { $('#overlay').hidden = true; };
+$('#overlay').addEventListener('click', e => { if (e.target.id === 'overlay') $('#overlay').hidden = true; });
+
+async function run(p, ok) {
+  try { await p; if (ok) toast(ok); return true; }
+  catch (e) { console.error(e); toast('保存できませんでした（' + (e.code || e.message) + '）'); return false; }
+}
+
+/* ===================== 元に戻す（アンドゥ） =====================
+   管理者がこの画面で行った変更を、新しいものから順に取り消せる（最大50件）。
+   ページを再読み込み・ログアウトすると履歴は消える。 */
+const undoStack = [];
+async function saveWithUndo(label, doIt, undoIt) {
+  const ok = await run(doIt());
+  if (ok) {
+    undoStack.push({ label, undoIt });
+    if (undoStack.length > 50) undoStack.shift();
+    renderFooter();
+  }
+  return ok;
+}
+async function undoLast() {
+  const u = undoStack.pop(); renderFooter();
+  if (!u) return;
+  try { await u.undoIt(); toast(`元に戻しました：${u.label}`); }
+  catch (e) { console.error(e); undoStack.push(u); renderFooter(); toast('元に戻せませんでした（' + (e.code || e.message) + '）'); }
+}
+const short = v => { const t = (v || '').replace(/\n/g, ' '); return t ? `「${t.length > 12 ? t.slice(0, 12) + '…' : t}」` : '（空）'; };
+
+function dayLabel(d) {
+  const [y, m] = state.ym.split('-').map(Number);
+  const hol = holidayName(y, m, d);
+  return `${m}/${d}(${hol ? '祝' : WD[new Date(y, m - 1, d).getDay()]})`;
+}
+
+// 月に初めて書き込むとき、その時点のメンバーを月に保存（後でメンバーを変えても過去の月は崩れない）
+function monthPatch(extra) { return state.month.staff ? extra : { staff: staff(), ...extra }; }
+
+function textEditor(title, cur, rows, onSave) {
+  openSheet(title, (body, close) => {
+    const ta = el('textarea'); ta.rows = rows; ta.value = cur;
+    const actions = el('div', 'actions');
+    actions.append(
+      btn('消去', 'btn danger', () => { close(); onSave(null); }),
+      el('span', 'grow'),
+      btn('保存', 'btn primary', () => { const v = ta.value.trim(); close(); onSave(v || null); }));
+    body.append(ta, actions);
+    setTimeout(() => ta.focus(), 50);
+  });
+}
+
+function openCellEditor(day, staffId) {
+  const s = staff().find(x => x.id === staffId); if (!s) return;
+  const ym = state.ym, key = `${day}_${staffId}`;
+  const cur = (state.month.cells || {})[key] || '';
+  const label = `${dayLabel(day)} ${s.name.replace(/\n/g, ' ')}`;
+  const save = v => {
+    if ((v || '') === cur) return;
+    saveWithUndo(`${label} ${short(cur)}→${short(v)}`,
+      () => store.updateMonth(ym, monthPatch({ cells: { [key]: v || DEL } })),
+      () => store.updateMonth(ym, { cells: { [key]: cur || DEL } }));
+  };
+  // 1行目＝選択肢 or 自由入力、2行目＝メモ。選んで・書いて、最後に「保存」で確定
+  const [curMain, ...curRest] = cur.split('\n');
+  const curMemo = curRest.join(' ');
+  openSheet(`${dayLabel(day)}　${s.name.replace('\n', ' ')}`, (body, close) => {
+    let sel = PRESETS.includes(curMain) ? curMain : '';
+    const lblChips = el('label', 'lbl', '1行目を選ぶ');
+    lblChips.style.marginTop = '0';
+    const chips = el('div', 'chips');
+    const free = el('input'); free.type = 'text'; free.placeholder = '例：御座候、マルカミ、病休';
+    if (curMain && !sel) free.value = curMain;   // 選択肢にない内容（以前のデータ含む）は自由入力欄へ
+    const mark = () => chips.querySelectorAll('.chip').forEach(c => c.classList.toggle('sel', c.dataset.v === sel));
+    PRESETS.forEach(p => {
+      const c = btn(p, ('chip ' + colorClass(p)).trim(), () => {
+        sel = sel === p ? '' : p;            // もう一度押すと選択解除
+        if (sel) free.value = '';
+        mark();
+      });
+      c.dataset.v = p; chips.append(c);
+    });
+    mark();
+    free.addEventListener('input', () => { if (free.value.trim()) { sel = ''; mark(); } });
+
+    const lblFree = el('label', 'lbl', 'その他（1行目を自由に入力）');
+    lblFree.style.marginTop = '12px';
+    const lblMemo = el('label', 'lbl', '2行目のメモ（任意）');
+    lblMemo.style.marginTop = '12px';
+    const memo = el('input'); memo.type = 'text'; memo.value = curMemo; memo.placeholder = '例：朝のみ、研修、予定有';
+
+    const doSave = () => {
+      const main = free.value.trim() || sel;
+      const m = memo.value.trim();
+      close();
+      if (!main && !m) { save(null); return; }
+      save(main + (m ? '\n' + m : ''));
+    };
+    [free, memo].forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) doSave(); }));
+
+    const actions = el('div', 'actions');
+    actions.append(
+      btn('消去', 'btn danger', () => { close(); save(null); }),
+      el('span', 'grow'),
+      btn('保存', 'btn primary', doSave));
+    body.append(lblChips, chips, lblFree, free, lblMemo, memo, actions);
+  });
+}
+
+function openNoteEditor(day) {
+  const ym = state.ym;
+  const cur = (state.month.notes || {})[day] || '';
+  textEditor(`${dayLabel(day)}　備考`, cur, 3, v => {
+    if ((v || '') === cur) return;
+    saveWithUndo(`${dayLabel(day)} 備考`,
+      () => store.updateMonth(ym, monthPatch({ notes: { [day]: v || DEL } })),
+      () => store.updateMonth(ym, { notes: { [day]: cur || DEL } }));
+  });
+}
+
+function openMemoEditor(day) {
+  const ym = state.ym;
+  const cur = (state.memos || {})[day] || '';
+  textEditor(`${dayLabel(day)}　メモ（管理者だけに表示）`, cur, 2, v => {
+    if ((v || '') === cur) return;
+    saveWithUndo(`${dayLabel(day)} メモ`,
+      () => store.updateMemo(ym, { memos: { [day]: v || DEL } }),
+      () => store.updateMemo(ym, { memos: { [day]: cur || DEL } }));
+  });
+}
+
+function openNoticeEditor() {
+  openSheet('お知らせ（すべての月に表示）', (body, close) => {
+    const ta = el('textarea'); ta.rows = 3; ta.value = state.settings.notice || '';
+    const actions = el('div', 'actions');
+    const old = state.settings.notice || '';
+    actions.append(btn('保存', 'btn primary', () => {
+      const v = ta.value.trim(); close();
+      if (v === old) return;
+      saveWithUndo('お知らせ', () => store.saveSettings({ notice: v }), () => store.saveSettings({ notice: old }));
+    }));
+    body.append(ta, actions);
+  });
+}
+
+/* ===================== 一括入力 ===================== */
+function openBulkEditor() {
+  const ym = state.ym;
+  const [y, m] = ym.split('-').map(Number);
+  const days = new Date(y, m, 0).getDate();
+  const list = staff();
+  const people = new Set();
+  const dates = new Set();
+  let sel = '';
+  openSheet(`一括入力（${y}年${m}月）`, (body, close) => {
+    // 1. メンバー
+    const s1 = el('div', 'bsec', '① だれに');
+    const pick = el('div', 'pick');
+    const drawPeople = () => pick.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', people.has(t.dataset.id)));
+    const allBtn = btn('全員', 'tab', () => {
+      if (people.size === list.length) people.clear(); else list.forEach(p => people.add(p.id));
+      drawPeople(); allBtn.classList.toggle('on', people.size === list.length);
+    });
+    pick.append(allBtn);
+    list.forEach(p => {
+      const t = btn(p.name.replace(/\n/g, ' '), 'tab', () => {
+        people.has(p.id) ? people.delete(p.id) : people.add(p.id);
+        drawPeople(); allBtn.classList.toggle('on', people.size === list.length);
+      });
+      t.dataset.id = p.id; pick.append(t);
+    });
+
+    // 2. 内容
+    const s2 = el('div', 'bsec', '② 何を入れる');
+    const chips = el('div', 'chips');
+    const free = el('input'); free.type = 'text'; free.placeholder = 'その他（1行目を自由に入力）';
+    const memo = el('input'); memo.type = 'text'; memo.placeholder = '2行目のメモ（任意）'; memo.style.marginTop = '6px';
+    const mark = () => chips.querySelectorAll('.chip').forEach(c => c.classList.toggle('sel', c.dataset.v === sel));
+    PRESETS.forEach(p => {
+      const c = btn(p, ('chip ' + colorClass(p)).trim(), () => { sel = sel === p ? '' : p; if (sel) free.value = ''; mark(); });
+      c.dataset.v = p; chips.append(c);
+    });
+    free.addEventListener('input', () => { if (free.value.trim()) { sel = ''; mark(); } });
+
+    // 3. 日付
+    const s3 = el('div', 'bsec', '③ どの日に');
+    const quick = el('div', 'quick');
+    const cal = el('div', 'mcal');
+    const dayInfo = d => { const w = new Date(y, m - 1, d).getDay(); return { w, hol: !!holidayName(y, m, d) }; };
+    const drawDates = () => cal.querySelectorAll('.md').forEach(b => b.classList.toggle('on', dates.has(Number(b.dataset.d))));
+    const setDates = f => { dates.clear(); for (let d = 1; d <= days; d++) if (f(d)) dates.add(d); drawDates(); };
+    quick.append(
+      btn('全日', 'btn', () => setDates(() => true)),
+      btn('平日', 'btn', () => setDates(d => { const i = dayInfo(d); return i.w > 0 && i.w < 6 && !i.hol; })),
+      btn('土日祝', 'btn', () => setDates(d => { const i = dayInfo(d); return i.w === 0 || i.w === 6 || i.hol; })),
+      btn('選択解除', 'btn', () => setDates(() => false)));
+    WD.forEach((w, i) => cal.append(el('div', 'wd' + (i === 0 ? ' su' : i === 6 ? ' sa' : ''), w)));
+    const first = new Date(y, m - 1, 1).getDay();
+    for (let i = 0; i < first; i++) cal.append(el('div', 'md blank'));
+    for (let d = 1; d <= days; d++) {
+      const i = dayInfo(d);
+      const b = btn(String(d), 'md' + ((i.w === 0 || i.hol) ? ' su' : i.w === 6 ? ' sa' : ''), () => {
+        dates.has(d) ? dates.delete(d) : dates.add(d); drawDates();
+      });
+      b.dataset.d = d; cal.append(b);
+    }
+
+    // 4. 上書き
+    const s4 = el('div', 'bsec', '④ すでに入力がある日は');
+    const radio = el('div', 'radio');
+    const mk = (val, text, checked) => {
+      const l = el('label'); const r = el('input'); r.type = 'radio'; r.name = 'ow'; r.value = val; r.checked = checked;
+      l.append(r, text); return l;
+    };
+    radio.append(mk('skip', 'そのまま残す（空いている日だけに入れる）', true), mk('over', '上書きする', false));
+
+    const actions = el('div', 'actions sticky-actions');
+    actions.append(
+      btn('消去する', 'btn danger', () => apply(true)),
+      el('span', 'grow'),
+      btn('入力する', 'btn primary', () => apply(false)));
+
+    function apply(erase) {
+      if (!people.size) { toast('①のメンバーを選んでください'); return; }
+      if (!dates.size) { toast('③の日付を選んでください'); return; }
+      const main = free.value.trim() || sel;
+      const mm = memo.value.trim();
+      if (!erase && !main) { toast('②の内容を選ぶか入力してください'); return; }
+      const val = erase ? null : main + (mm ? '\n' + mm : '');
+      const over = erase || body.querySelector('input[name=ow]:checked').value === 'over';
+      const cells = state.month.cells || {};
+      const patch = {}, inverse = {};
+      for (const pid of people) for (const d of dates) {
+        const k = `${d}_${pid}`, cur = cells[k] || '';
+        if (cur && !over) continue;
+        if ((val || '') === cur) continue;
+        patch[k] = val || DEL; inverse[k] = cur || DEL;
+      }
+      const n = Object.keys(patch).length;
+      if (!n) { toast(erase ? '消去する枠がありません' : '入れる枠がありません（すべて入力済み）'); return; }
+      if (erase && !confirm(`${n}枠を消去します。よろしいですか？`)) return;
+      close();
+      const names = list.filter(p => people.has(p.id)).map(p => p.name.replace(/\n/g, ' '));
+      const who = names.length === list.length ? '全員' : names.join('・');
+      const label = `${m}月 一括${erase ? '消去' : '入力'}（${who}・${n}枠）`;
+      saveWithUndo(label, () => store.updateMonth(ym, monthPatch({ cells: patch })), () => store.updateMonth(ym, { cells: inverse }))
+        .then(ok => ok && toast(erase ? `${n}枠を消去しました` : `${n}枠に${short(val)}を入力しました`));
+    }
+
+    body.append(s1, pick, s2, chips, free, memo, s3, quick, cal, s4, radio, actions);
+  });
+}
+
+function openMembersEditor() {
+  const ym = state.ym;
+  const [y, m] = ym.split('-').map(Number);
+  // 名前の改行は「/」で表示・入力（例：長野保有案件/御座候 → 2段の見出し）
+  const list = staff().map(s => ({ id: s.id, name: s.name.replace(/\n/g, '/') }));
+  openSheet(`メンバー編集（${y}年${m}月）`, (body, close) => {
+    const box = el('div');
+    const draw = () => {
+      box.replaceChildren();
+      list.forEach((s, i) => {
+        const row = el('div', 'mrow');
+        const inp = el('input'); inp.type = 'text'; inp.value = s.name; inp.placeholder = '名前';
+        inp.oninput = () => { s.name = inp.value; };
+        row.append(inp,
+          btn('↑', 'btn', () => { if (i > 0) { [list[i - 1], list[i]] = [list[i], list[i - 1]]; draw(); } }),
+          btn('↓', 'btn', () => { if (i < list.length - 1) { [list[i + 1], list[i]] = [list[i], list[i + 1]]; draw(); } }),
+          btn('外す', 'btn danger', () => { if (confirm(`「${s.name || '(名前なし)'}」をこの月の表から外しますか？`)) { list.splice(i, 1); draw(); } }));
+        box.append(row);
+      });
+    };
+    draw();
+    const add = btn('＋ メンバー追加', 'btn', () => { list.push({ id: 's' + Date.now().toString(36), name: '' }); draw(); box.lastChild.querySelector('input').focus(); });
+    const hint = el('p', 'hint',
+      '「/」で区切ると見出しが2段になります（例：長野保有案件/御座候）。');
+    hint.style.whiteSpace = 'pre-line';
+    const clean = () => {
+      const c = list.map(s => ({ id: s.id, name: s.name.split('/').map(t => t.trim()).filter(Boolean).join('\n') })).filter(s => s.name);
+      if (!c.length) toast('1人以上必要です');
+      return c.length ? c : null;
+    };
+    const lblSave = el('label', 'lbl', '保存のしかた');
+    lblSave.style.marginTop = '14px';
+    const saveRow = el('div', 'saverow');
+    saveRow.append(
+      btn(`${m}月だけに保存`, 'btn', () => {
+        const c = clean(); if (!c) return;
+        close();
+        const before = state.month.staff ? state.month.staff : staff();
+        saveWithUndo(`${m}月のメンバー`, () => store.updateMonth(ym, { staff: c }), () => store.updateMonth(ym, { staff: before }));
+      }),
+      btn(`${m}月以降すべてに保存`, 'btn primary', async () => {
+        const c = clean(); if (!c) return;
+        if (!confirm(`${y}年${m}月と、それより先のすべての月（入力済みの月も含む）のメンバーをこの内容にします。よろしいですか？`)) return;
+        close();
+        try {
+          const thisBefore = state.month.staff ? state.month.staff : staff();
+          const r = await store.applyStaffFrom(ym, c);
+          r.before[ym] = thisBefore;
+          undoStack.push({ label: `${m}月以降のメンバー`, undoIt: () => store.restoreStaff(r.before, r.settingsBefore) });
+          if (undoStack.length > 50) undoStack.shift();
+          renderFooter();
+          toast(`${y}年${m}月以降の${r.count}か月分に反映しました`);
+        } catch (e) { console.error(e); toast('保存できませんでした（' + (e.code || e.message) + '）'); }
+      }));
+    const hint2 = el('p', 'hint', `「以降すべて」は、まだ入力していない先の月にも使われます。${m}月より前の月は変わりません。`);
+    body.append(box, add, hint, lblSave, saveRow, hint2);
+  });
+}
+
+function openImport() {
+  openSheet('Excelデータの取り込み', (body, close) => {
+    const p = el('p', 'hint', 'Excelから変換した import.json を選んでください。選んだ月は、アプリ上のデータが上書きされます。');
+    const file = el('input'); file.type = 'file'; file.accept = '.json,application/json';
+    file.style.margin = '10px 0';
+    const checks = el('div', 'checks');
+    const actions = el('div', 'actions');
+    const go = btn('取り込む', 'btn primary', null); go.disabled = true;
+    let months = {};
+    file.onchange = async () => {
+      try {
+        const json = JSON.parse(await file.files[0].text());
+        months = json.months || {};
+        checks.replaceChildren();
+        Object.keys(months).sort().forEach(ym => {
+          const [y, m] = ym.split('-').map(Number);
+          const lab = el('label'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = true; cb.value = ym;
+          lab.append(cb, document.createTextNode(`${y}年${m}月`)); checks.append(lab);
+        });
+        go.disabled = !Object.keys(months).length;
+      } catch (e) { toast('ファイルを読めませんでした'); }
+    };
+    go.onclick = () => {
+      const picked = [...checks.querySelectorAll('input:checked')].map(c => c.value);
+      if (!picked.length) return;
+      if (!confirm(`${picked.length}か月分を取り込みます。既にある内容は上書きされます。よろしいですか？`)) return;
+      const sel = Object.fromEntries(picked.map(ym => [ym, months[ym]]));
+      close(); run(store.importMonths(sel), `${picked.length}か月分を取り込みました`);
+    };
+    actions.append(go);
+    body.append(p, file, checks, actions);
+  });
+}
+
+$('#notice').addEventListener('click', () => { if (isAdmin()) openNoticeEditor(); });
+$('#pwrap').addEventListener('click', e => {
+  if (!isAdmin()) return;
+  const c = e.target.closest('.pc'); const p = personNow();
+  if (c && !c.classList.contains('blank') && p) openCellEditor(Number(c.dataset.day), p.id);
+});
+$('#grid').addEventListener('click', e => {
+  if (!isAdmin()) return;
+  const td = e.target.closest('td'); if (!td) return;
+  const day = Number(td.dataset.day);
+  if (td.classList.contains('cell')) openCellEditor(day, td.dataset.staff);
+  else if (td.classList.contains('note')) openNoteEditor(day);
+  else if (td.classList.contains('memo')) openMemoEditor(day);
+});
+
+/* ===================== 月の切り替え ===================== */
+function watchMemo() {
+  if (unsubMemo) { unsubMemo(); unsubMemo = null; }
+  state.memos = {};
+  if (isAdmin()) unsubMemo = store.subscribeMemo(state.ym, d => { state.memos = (d && d.memos) || {}; render(); });
+}
+function watchMonth() {
+  if (unsubMonth) unsubMonth();
+  state.month = {};
+  setHash();
+  render();
+  unsubMonth = store.subscribeMonth(state.ym, data => { state.month = data || {}; render(); scrollToTodayOnce(); });
+  watchMemo();
+}
+$('#prev').onclick = () => { state.ym = shiftYm(state.ym, -1); watchMonth(); };
+$('#next').onclick = () => { state.ym = shiftYm(state.ym, 1); watchMonth(); };
+$('#thisMonth').onclick = () => { state.ym = ymOf(new Date()); scrolledFor = null; watchMonth(); };
+
+/* ===================== 起動 ===================== */
+(async () => {
+  try {
+    store = firebaseConfig.apiKey ? await createFirebaseStore() : createDemoStore();
+  } catch (e) {
+    console.error(e); toast('Firebaseに接続できませんでした'); store = createDemoStore();
+  }
+  $('#demo').hidden = !store.demo;
+  store.subscribeSettings(s => { state.settings = s ? { ...DEFAULT_SETTINGS, ...s } : DEFAULT_SETTINGS; render(); });
+  watchMonth();
+  store.onAuth(u => { state.user = u; if (!u) undoStack.length = 0; watchMemo(); render(); });
+})();
+</script>
+</body>
+</html>
