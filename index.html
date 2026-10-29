@@ -49,9 +49,10 @@ h1{font-size:18px;margin:0}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn.danger{color:#d23b3b}
 .notice{margin:8px 0 0;font-size:13px;white-space:pre-wrap}
-.notice.has{display:grid;grid-template-columns:auto 1fr;gap:6px;align-items:start;background:var(--notice-bg);border:1px solid var(--notice-line);border-radius:8px;padding:7px 10px;line-height:1.5}
+.notice.has{display:flex;flex-direction:column;gap:5px}
+.notice .nrow{display:grid;grid-template-columns:auto 1fr;gap:6px;align-items:start;background:var(--notice-bg);border:1px solid var(--notice-line);border-radius:8px;padding:6px 10px;line-height:1.5}
 .notice .nicon{font-size:16px;line-height:1.25}
-.notice.has.editable::after{grid-column:1/-1}
+.notice.has.editable{padding:5px}
 .notice:empty{display:none}
 .notice.editable{cursor:pointer;border:1px dashed var(--line);border-radius:8px;padding:6px 8px}
 .notice.editable::after{content:"✎ 編集（全月共通）";display:block;font-size:11px;color:var(--muted);margin-top:2px}
@@ -191,7 +192,7 @@ textarea,input[type=text]{width:100%;font:inherit;font-size:16px;padding:8px;bor
     <button class="btn" id="thisMonth" type="button">今月</button>
   </div>
   <div class="tabs" id="tabs" role="tablist" aria-label="表示の切り替え"></div>
-  <p class="notice" id="notice"></p>
+  <div class="notice" id="notice"></div>
 </header>
 <div class="wrap" id="wrap"><table id="grid"></table></div>
 <div class="pwrap" id="pwrap" hidden></div>
@@ -585,9 +586,9 @@ function renderHeader() {
   document.title = APP_TITLE;
   $('#ym').textContent = `${y}年${m}月`;
   const nt = $('#notice'), admin = isAdmin();
-  const text = (state.settings.notice || '').trim();
-  nt.classList.toggle('has', !!text);
-  if (text) nt.replaceChildren(el('span', 'nicon', '📣'), el('span', 'ntext', text));
+  const list = notices();
+  nt.classList.toggle('has', list.length > 0);
+  if (list.length) nt.replaceChildren(...list.map(t => { const r = el('div', 'nrow'); r.append(el('span', 'nicon', '📣'), el('span', 'ntext', t)); return r; }));
   else nt.textContent = admin ? '（お知らせなし：タップして入力）' : '';
   nt.classList.toggle('editable', admin);
   nt.title = admin ? 'タップして編集（全月共通）' : '';
@@ -822,17 +823,36 @@ function openMemoEditor(day) {
   });
 }
 
+// お知らせ（最大3つ）。以前の1つだけの形式（notice）にも対応
+const NOTICE_MAX = 3;
+function noticeSlots() {
+  const st = state.settings;
+  const arr = Array.isArray(st.notices) ? st.notices : [st.notice || ''];
+  return Array.from({ length: NOTICE_MAX }, (_, i) => (arr[i] || '').trim());
+}
+const notices = () => noticeSlots().filter(Boolean);
+
 function openNoticeEditor() {
   openSheet('お知らせ（すべての月に表示）', (body, close) => {
-    const ta = el('textarea'); ta.rows = 3; ta.value = state.settings.notice || '';
+    const old = noticeSlots();
+    const tas = old.map((v, i) => {
+      const lbl = el('label', 'lbl', `📣 お知らせ${i + 1}`); if (i) lbl.style.marginTop = '10px';
+      const ta = el('textarea'); ta.rows = 2; ta.value = v; ta.placeholder = '空欄なら表示しません';
+      body.append(lbl, ta); return ta;
+    });
+    const hint = el('p', 'hint', '入力した順に上から表示されます。空欄の欄は表示されません。');
     const actions = el('div', 'actions');
-    const old = state.settings.notice || '';
     actions.append(btn('保存', 'btn primary', () => {
-      const v = ta.value.trim(); close();
-      if (v === old) return;
-      saveWithUndo('お知らせ', () => store.saveSettings({ notice: v }), () => store.saveSettings({ notice: old }));
+      // 空欄を詰めて、入力のある欄を上からそろえる
+      const filled = tas.map(t => t.value.trim()).filter(Boolean);
+      const next = Array.from({ length: NOTICE_MAX }, (_, i) => filled[i] || '');
+      close();
+      if (next.join('\u0000') === old.join('\u0000')) return;
+      saveWithUndo('お知らせ',
+        () => store.saveSettings({ notices: next, notice: '' }),
+        () => store.saveSettings({ notices: old, notice: '' }));
     }));
-    body.append(ta, actions);
+    body.append(hint, actions);
   });
 }
 
