@@ -142,6 +142,8 @@ textarea,input[type=text]{width:100%;font:inherit;font-size:16px;padding:8px;bor
 .mrow{display:flex;gap:6px;margin-bottom:6px}
 .mrow input{flex:1;min-width:0}
 .mrow .btn{padding:6px 10px}
+.fmtrow{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.fmtrow .btn{min-height:44px}
 .saverow{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .saverow .btn{min-height:44px;line-height:1.25}
 .bsec{font-size:13px;font-weight:700;margin:14px 0 6px}
@@ -670,7 +672,7 @@ function renderFooter() {
   const f = $('#footer'); f.replaceChildren();
   f.classList.toggle('admin', isAdmin());
   if (!state.user) {
-    f.append(el('span', 'grow', ''), btn('管理者ログイン', 'linkbtn', () => store.login().catch(e => toast('ログインできませんでした（' + (e.code || e.message) + '）'))));
+    f.append(btn('書き出し', 'btn', openExport), el('span', 'grow', ''), btn('管理者ログイン', 'linkbtn', () => store.login().catch(e => toast('ログインできませんでした（' + (e.code || e.message) + '）'))));
   } else if (isAdmin()) {
     const ub = btn(`↶ 元に戻す${undoStack.length ? `（${undoStack.length}）` : ''}`, 'btn', undoLast);
     ub.disabled = !undoStack.length;
@@ -678,10 +680,10 @@ function renderFooter() {
     f.append(ub, el('span', 'grow', ''),
       btn('一括入力', 'btn primary', openBulkEditor),
       btn('メンバー', 'btn', openMembersEditor),
-      btn('取込', 'btn', openImport),
+      btn('書き出し', 'btn', openExport),
       btn('ログアウト', 'linkbtn', () => store.logout()));
   } else {
-    f.append(el('span', 'grow', `${state.user.email} には編集権限がありません`), btn('ログアウト', 'btn', () => store.logout()));
+    f.append(btn('書き出し', 'btn', openExport), el('span', 'grow', `${state.user.email} には編集権限がありません`), btn('ログアウト', 'btn', () => store.logout()));
   }
 }
 
@@ -1023,37 +1025,263 @@ function openMembersEditor() {
   });
 }
 
-function openImport() {
-  openSheet('Excelデータの取り込み', (body, close) => {
-    const p = el('p', 'hint', 'Excelから変換した import.json を選んでください。選んだ月は、アプリ上のデータが上書きされます。');
-    const file = el('input'); file.type = 'file'; file.accept = '.json,application/json';
-    file.style.margin = '10px 0';
-    const checks = el('div', 'checks');
-    const actions = el('div', 'actions');
-    const go = btn('取り込む', 'btn primary', null); go.disabled = true;
-    let months = {};
-    file.onchange = async () => {
-      try {
-        const json = JSON.parse(await file.files[0].text());
-        months = json.months || {};
-        checks.replaceChildren();
-        Object.keys(months).sort().forEach(ym => {
-          const [y, m] = ym.split('-').map(Number);
-          const lab = el('label'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = true; cb.value = ym;
-          lab.append(cb, document.createTextNode(`${y}年${m}月`)); checks.append(lab);
-        });
-        go.disabled = !Object.keys(months).length;
-      } catch (e) { toast('ファイルを読めませんでした'); }
-    };
-    go.onclick = () => {
-      const picked = [...checks.querySelectorAll('input:checked')].map(c => c.value);
-      if (!picked.length) return;
-      if (!confirm(`${picked.length}か月分を取り込みます。既にある内容は上書きされます。よろしいですか？`)) return;
-      const sel = Object.fromEntries(picked.map(ym => [ym, months[ym]]));
-      close(); run(store.importMonths(sel), `${picked.length}か月分を取り込みました`);
-    };
-    actions.append(go);
-    body.append(p, file, checks, actions);
+/* ===================== 書き出し（Excel・PDF） =====================
+   追加の部品は使わず、アプリの中だけでファイルを作る */
+const EXP_COLORS = {   // 書き出し用の色（画面の明るい表示と同じ）
+  'k-work': ['00B0F0', '062A3A'], 'k-east': ['FFFF00', '333333'], 'k-west': ['00B050', 'FFFFFF'],
+  'k-yodo': ['FF0000', 'FFFFFF'], 'k-off': ['FBE4D5', '5B2A12'], 'k-ng': ['FFFFFF', '7A7A7A'],
+};
+function monthData(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  const days = new Date(y, m, 0).getDate();
+  const list = staff(), cells = state.month.cells || {}, notes = state.month.notes || {};
+  const rows = [];
+  for (let d = 1; d <= days; d++) {
+    const w = new Date(y, m - 1, d).getDay(), hol = holidayName(y, m, d);
+    rows.push({ d, w, hol, wd: hol ? (hol.includes('振替') ? '振' : '祝') : WD[w], vals: list.map(s => cells[`${d}_${s.id}`] || ''), note: notes[d] || '' });
+  }
+  const offs = list.map((s, i) => rows.filter(r => isOff(r.vals[i])).length);
+  return { y, m, days, list, rows, offs };
+}
+
+// ---------- ZIP（無圧縮） ----------
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = b => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC_T[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+function makeZip(files) {
+  const enc = new TextEncoder(), parts = [], central = []; let off = 0;
+  for (const [name, text] of files) {
+    const nb = enc.encode(name), data = enc.encode(text), crc = crc32(data);
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true);
+    h.setUint32(14, crc, true); h.setUint32(18, data.length, true); h.setUint32(22, data.length, true); h.setUint16(26, nb.length, true);
+    parts.push(new Uint8Array(h.buffer), nb, data);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true);
+    c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true); c.setUint16(28, nb.length, true); c.setUint32(42, off, true);
+    central.push(new Uint8Array(c.buffer), nb);
+    off += 30 + nb.length + data.length;
+  }
+  const csize = central.reduce((a, p) => a + p.length, 0);
+  const e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, csize, true); e.setUint32(16, off, true);
+  return new Blob([...parts, ...central, new Uint8Array(e.buffer)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+
+// ---------- Excel ----------
+function buildXlsx(ym) {
+  const D = monthData(ym);
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  // スタイル：0=標準 1=見出し 2=枠(白) 3=タイトル 4=お知らせ 5=備考(左寄せ) 6=土 7=日祝 + 色ごと
+  const kinds = Object.keys(EXP_COLORS);
+  const fills = ['<fill><patternFill patternType="none"/></fill>', '<fill><patternFill patternType="gray125"/></fill>'];
+  const addFill = hex => { fills.push(`<fill><patternFill patternType="solid"><fgColor rgb="FF${hex}"/><bgColor indexed="64"/></patternFill></fill>`); return fills.length - 1; };
+  const fonts = ['<font><sz val="11"/><name val="Meiryo"/></font>', '<font><b/><sz val="11"/><name val="Meiryo"/></font>', '<font><b/><sz val="16"/><name val="Meiryo"/></font>'];
+  const addFont = (hex, bold) => { fonts.push(`<font>${bold ? '<b/>' : ''}<sz val="11"/><color rgb="FF${hex}"/><name val="Meiryo"/></font>`); return fonts.length - 1; };
+  const C = 'applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>';
+  const L = 'applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>';
+  const xfs = [
+    `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>`,
+    `<xf numFmtId="0" fontId="1" fillId="${addFill('EEEEEE')}" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" ${C}`,
+    `<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" ${C}`,
+    `<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" ${L}`,
+    `<xf numFmtId="0" fontId="0" fillId="${addFill('FFF6CC')}" borderId="0" xfId="0" applyFill="1" ${L}`,
+    `<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" ${L}`,
+    `<xf numFmtId="0" fontId="${addFont('1F57C3', true)}" fillId="${addFill('DEEAF6')}" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" ${C}`,
+    `<xf numFmtId="0" fontId="${addFont('C62828', true)}" fillId="${addFill('FBE4D5')}" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" ${C}`,
+  ];
+  const kindXf = {};
+  kinds.forEach(k => { const [bg, fg] = EXP_COLORS[k]; xfs.push(`<xf numFmtId="0" fontId="${addFont(fg, false)}" fillId="${addFill(bg)}" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" ${C}`); kindXf[k] = xfs.length - 1; });
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="${fonts.length}">${fonts.join('')}</fonts>
+<fills count="${fills.length}">${fills.join('')}</fills>
+<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFBFBFBF"/></left><right style="thin"><color rgb="FFBFBFBF"/></right><top style="thin"><color rgb="FFBFBFBF"/></top><bottom style="thin"><color rgb="FFBFBFBF"/></bottom><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="${xfs.length}">${xfs.join('')}</cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+  const col = n => { let s = ''; n++; while (n) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = (n - 1 - r) / 26 | 0; } return s; };
+  const str = (r, c, v, s) => `<c r="${col(c)}${r}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${esc(v)}</t></is></c>`;
+  const num = (r, c, v, s) => `<c r="${col(c)}${r}" s="${s}"><v>${v}</v></c>`;
+  const n = D.list.length, last = n + 2;   // 列：A=日 B=曜 C..=メンバー 最後=備考
+  const rowsXml = [];
+  rowsXml.push(`<row r="1" ht="28" customHeight="1">${str(1, 0, `稼働予定表　${D.y}年${D.m}月`, 3)}</row>`);
+  const nts = notices();
+  rowsXml.push(`<row r="2" ht="${Math.max(18, 16 * Math.max(1, nts.length))}" customHeight="1">${str(2, 0, nts.map(t => '📣 ' + t).join('\n'), 4)}</row>`);
+  rowsXml.push(`<row r="3" ht="34" customHeight="1">${str(3, 0, `${D.m}月`, 1)}${str(3, 1, '曜', 1)}${D.list.map((s, i) => str(3, i + 2, s.name, 1)).join('')}${str(3, last, '備考', 1)}</row>`);
+  rowsXml.push(`<row r="4" ht="20" customHeight="1">${str(4, 0, '休み日数', 1)}${str(4, 1, '', 1)}${D.offs.map((v, i) => num(4, i + 2, v, 1)).join('')}${str(4, last, '', 1)}</row>`);
+  D.rows.forEach((r, i) => {
+    const R = i + 5, ds = (r.w === 0 || r.hol) ? 7 : r.w === 6 ? 6 : 2;
+    rowsXml.push(`<row r="${R}" ht="32" customHeight="1">${num(R, 0, r.d, ds)}${str(R, 1, r.wd, ds)}${r.vals.map((v, j) => str(R, j + 2, v, kindXf[colorClass(v)] || 2)).join('')}${str(R, last, r.note, 5)}</row>`);
+  });
+  const cols = `<cols><col min="1" max="1" width="9" customWidth="1"/><col min="2" max="2" width="5" customWidth="1"/><col min="3" max="${n + 2}" width="12" customWidth="1"/><col min="${n + 3}" max="${n + 3}" width="40" customWidth="1"/></cols>`;
+  const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheetViews><sheetView workbookViewId="0"><pane xSplit="2" ySplit="4" topLeftCell="C5" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>
+<sheetFormatPr defaultRowHeight="18"/>${cols}<sheetData>${rowsXml.join('')}</sheetData>
+<mergeCells count="2"><mergeCell ref="A1:${col(last)}1"/><mergeCell ref="A2:${col(last)}2"/></mergeCells>
+<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/>
+<pageSetup paperSize="9" orientation="${n > 6 ? 'landscape' : 'portrait'}" fitToHeight="1" fitToWidth="1"/>
+</worksheet>`.replace('<sheetViews>', '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetViews>');
+  const sheetName = `${D.y}年${D.m}月`;
+  return makeZip([
+    ['[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`],
+    ['_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
+    ['xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${esc(sheetName)}" sheetId="1" r:id="rId1"/></sheets></workbook>`],
+    ['xl/_rels/workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
+    ['xl/worksheets/sheet1.xml', sheet],
+    ['xl/styles.xml', styles],
+  ]);
+}
+
+// ---------- PDF（絵として描いてPDFに貼る） ----------
+const FONT = '"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Noto Sans CJK JP","Yu Gothic",Meiryo,sans-serif';
+function a4Canvas(landscape) {
+  const SC = 3, W = (landscape ? 842 : 595), H = (landscape ? 595 : 842);
+  const cv = document.createElement('canvas'); cv.width = W * SC; cv.height = H * SC;
+  const g = cv.getContext('2d'); g.scale(SC, SC); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+  return { cv, g, W, H };
+}
+function fitText(g, text, x, y, maxW, size, weight = 400, color = '#1d1d1f', align = 'center') {
+  let s = size; g.font = `${weight} ${s}px ${FONT}`;
+  while (s > 5 && g.measureText(text).width > maxW) { s -= 0.5; g.font = `${weight} ${s}px ${FONT}`; }
+  g.fillStyle = color; g.textAlign = align; g.textBaseline = 'middle'; g.fillText(text, x, y);
+}
+function cellText(g, v, x, y, w, h, color, big = 9.5) {
+  const [l1, ...rest] = v.split('\n'); const l2 = rest.join(' ');
+  if (l2) { fitText(g, l1, x + w / 2, y + h * 0.36, w - 4, big, 600, color); fitText(g, l2, x + w / 2, y + h * 0.70, w - 4, big - 2, 400, color); }
+  else fitText(g, l1, x + w / 2, y + h / 2, w - 4, big, 600, color);
+}
+function drawNotices(g, x, y, w) {
+  const nts = notices(); let yy = y;
+  nts.forEach(t => {
+    g.fillStyle = '#FFF6CC'; g.strokeStyle = '#F2D675'; g.lineWidth = .6;
+    g.beginPath(); g.roundRect(x, yy, w, 16, 3); g.fill(); g.stroke();
+    fitText(g, '📣 ' + t, x + 6, yy + 8.5, w - 12, 8.5, 400, '#1d1d1f', 'left'); yy += 19;
+  });
+  return yy;
+}
+function drawTablePage(ym) {
+  const D = monthData(ym), n = D.list.length, land = n > 6;
+  const { cv, g, W, H } = a4Canvas(land);
+  const M = 24; let y = M;
+  fitText(g, `稼働予定表　${D.y}年${D.m}月`, M, y + 9, W - M * 2, 16, 800, '#1d1d1f', 'left'); y += 24;
+  y = drawNotices(g, M, y, W - M * 2) + 2;
+  const dw = 22, ww = 18, noteW = land ? 150 : 120, cw = (W - M * 2 - dw - ww - noteW) / n;
+  const headH = 26, offH = 14, rh = (H - M - y - headH - offH) / D.days;
+  const cols = [dw, ww, ...Array(n).fill(cw), noteW];
+  const xs = cols.reduce((a, w) => (a.push(a[a.length - 1] + w), a), [M]);
+  const box = (x, yy, w, h, fill) => { if (fill) { g.fillStyle = fill; g.fillRect(x, yy, w, h); } g.strokeStyle = '#BFBFBF'; g.lineWidth = .5; g.strokeRect(x, yy, w, h); };
+  // 見出し
+  const heads = [`${D.m}月`, '曜', ...D.list.map(s => s.name), '備考'];
+  heads.forEach((t, i) => { box(xs[i], y, cols[i], headH, '#EEEEEE'); cellText(g, t, xs[i], y, cols[i], headH, '#1d1d1f', 9); });
+  y += headH;
+  const offRow = ['休み', '', ...D.offs.map(String), ''];
+  offRow.forEach((t, i) => { box(xs[i], y, cols[i], offH, '#F7F7F7'); fitText(g, t, xs[i] + cols[i] / 2, y + offH / 2, cols[i] - 2, 8, 400, '#6b6b70'); });
+  y += offH;
+  D.rows.forEach(r => {
+    const dayBg = (r.w === 0 || r.hol) ? '#FBE4D5' : r.w === 6 ? '#DEEAF6' : '#FFFFFF';
+    const dayFg = (r.w === 0 || r.hol) ? '#C62828' : r.w === 6 ? '#1F57C3' : '#1d1d1f';
+    box(xs[0], y, dw, rh, dayBg); fitText(g, String(r.d), xs[0] + dw / 2, y + rh / 2, dw - 2, 8.5, 700, dayFg);
+    box(xs[1], y, ww, rh, dayBg); fitText(g, r.wd, xs[1] + ww / 2, y + rh / 2, ww - 2, 8, 600, dayFg);
+    r.vals.forEach((v, j) => {
+      const k = colorClass(v), c = EXP_COLORS[k];
+      box(xs[j + 2], y, cw, rh, c ? '#' + c[0] : '#FFFFFF');
+      if (v) cellText(g, v, xs[j + 2], y, cw, rh, c ? '#' + c[1] : '#1d1d1f', Math.min(9, rh * .45));
+    });
+    box(xs[n + 2], y, noteW, rh, '#FFFFFF');
+    if (r.note) fitText(g, r.note.replace(/\n/g, ' '), xs[n + 2] + 4, y + rh / 2, noteW - 8, 7.5, 400, '#1d1d1f', 'left');
+    y += rh;
+  });
+  return { cv, W, H };
+}
+function drawPersonPage(ym, p) {
+  const D = monthData(ym), idx = D.list.findIndex(s => s.id === p.id);
+  const { cv, g, W, H } = a4Canvas(false);
+  const M = 36; let y = M;
+  fitText(g, `${D.y}年`, M, y + 8, 60, 12, 600, '#6b6b70', 'left');
+  fitText(g, `${D.m}月`, M + 40, y + 10, 120, 28, 800, '#1d1d1f', 'left');
+  fitText(g, p.name.replace(/\n/g, ' '), M, y + 40, 300, 20, 800, '#0b7fc0', 'left');
+  const off = D.offs[idx], work = D.rows.filter(r => r.vals[idx] && !isOff(r.vals[idx])).length;
+  g.fillStyle = '#FBE4D5'; g.beginPath(); g.roundRect(W - M - 90, y, 90, 50, 8); g.fill();
+  fitText(g, '休み', W - M - 45, y + 14, 80, 10, 500, '#5b2a12'); fitText(g, `${off}日`, W - M - 45, y + 34, 80, 20, 800, '#5b2a12');
+  y += 64;
+  y = drawNotices(g, M, y, W - M * 2) + 6;
+  const first = new Date(D.y, D.m - 1, 1).getDay(), weeks = Math.ceil((first + D.days) / 7);
+  const gap = 4, cw = (W - M * 2 - gap * 6) / 7, wdH = 18, ch = Math.min(96, (H - M - 30 - y - wdH - gap * weeks) / weeks);
+  WD.forEach((w, i) => fitText(g, w, M + i * (cw + gap) + cw / 2, y + wdH / 2, cw, 11, 700, i === 0 ? '#d32f2f' : i === 6 ? '#1f57c3' : '#1d1d1f'));
+  y += wdH + 2;
+  D.rows.forEach(r => {
+    const pos = first + r.d - 1, cx = M + (pos % 7) * (cw + gap), cy = y + Math.floor(pos / 7) * (ch + gap);
+    const v = r.vals[idx], c = EXP_COLORS[colorClass(v)];
+    g.fillStyle = c ? '#' + c[0] : '#FFFFFF'; g.strokeStyle = c ? 'transparent' : '#D4D1CC'; g.lineWidth = .8;
+    g.beginPath(); g.roundRect(cx, cy, cw, ch, 6); g.fill(); if (!c) g.stroke();
+    const fg = c ? '#' + c[1] : ((r.w === 0 || r.hol) ? '#d32f2f' : r.w === 6 ? '#1f57c3' : '#1d1d1f');
+    fitText(g, String(r.d) + (r.hol ? ' 祝' : ''), cx + 6, cy + 11, cw - 8, 12, 800, fg, 'left');
+    if (v) cellText(g, v, cx, cy + 12, cw, ch - 12, c ? '#' + c[1] : '#1d1d1f', 12);
+  });
+  y += weeks * (ch + gap) + 8;
+  fitText(g, `出勤 ${D.rows.filter(r => r.vals[idx] && !isOff(r.vals[idx])).length}日 / 休み ${off}日`, W - M, y + 8, 200, 10, 500, '#6b6b70', 'right');
+  return { cv, W, H };
+}
+const canvasToJpeg = cv => new Promise((res, rej) => cv.toBlob(b => b ? res(b) : rej(new Error('jpeg')), 'image/jpeg', 0.92));
+function canvasToPdf(pages) {
+  const enc = new TextEncoder(), chunks = [], offsets = []; let len = 0;
+  const push = x => { const b = typeof x === 'string' ? enc.encode(x) : x; chunks.push(b); len += b.length; };
+  const nObj = 2 + pages.length * 3; const kids = [];
+  push('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
+  const jpegs = pages.map(p => { const b64 = p.cv.toDataURL('image/jpeg', 0.9).split(',')[1]; const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; });
+  pages.forEach((p, i) => kids.push(`${3 + i * 3} 0 R`));
+  offsets[1] = len; push('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+  offsets[2] = len; push(`2 0 obj\n<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${pages.length} >>\nendobj\n`);
+  pages.forEach((p, i) => {
+    const pg = 3 + i * 3, im = pg + 1, ct = pg + 2, content = `q ${p.W} 0 0 ${p.H} 0 0 cm /Im0 Do Q`;
+    offsets[pg] = len; push(`${pg} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${p.W} ${p.H}] /Resources << /XObject << /Im0 ${im} 0 R >> >> /Contents ${ct} 0 R >>\nendobj\n`);
+    offsets[im] = len; push(`${im} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${p.cv.width} /Height ${p.cv.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegs[i].length} >>\nstream\n`); push(jpegs[i]); push('\nendstream\nendobj\n');
+    offsets[ct] = len; push(`${ct} 0 obj\n<< /Length ${content.length} >>\nstream\n${content}\nendstream\nendobj\n`);
+  });
+  const xref = len;
+  let x = `xref\n0 ${nObj + 1}\n0000000000 65535 f \n`; for (let i = 1; i <= nObj; i++) x += String(offsets[i]).padStart(10, '0') + ' 00000 n \n';
+  push(x + `trailer\n<< /Size ${nObj + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`);
+  return new Blob(chunks, { type: 'application/pdf' });
+}
+
+// ---------- 保存・共有 ----------
+async function deliver(blob, name) {
+  const file = new File([blob], name, { type: blob.type });
+  const mobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (mobile && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+}
+
+function openExport() {
+  const ym = state.ym, [y, m] = ym.split('-').map(Number), list = staff();
+  let pid = personNow() ? personNow().id : list[0].id;
+  openSheet(`書き出し（${y}年${m}月）`, (body, close) => {
+    const run1 = async (fn, okMsg) => { close(); toast('作成中…'); try { await fn(); toast(okMsg); } catch (e) { console.error(e); toast('作成できませんでした'); } };
+    const s1 = el('div', 'bsec', '全員の表');
+    const base = `稼働予定表_${y}年${m}月`;
+    const row1 = el('div', 'fmtrow');
+    row1.append(
+      btn('Excel', 'btn', () => run1(() => deliver(buildXlsx(ym), base + '.xlsx'), 'Excelを作成しました')),
+      btn('PDF', 'btn', () => run1(() => deliver(canvasToPdf([drawTablePage(ym)]), base + '.pdf'), 'PDFを作成しました')),
+      btn('画像(JPEG)', 'btn', () => run1(async () => deliver(await canvasToJpeg(drawTablePage(ym).cv), base + '.jpg'), '画像を作成しました')));
+    const s2 = el('div', 'bsec', '個人カレンダー');
+    const pick = el('div', 'pick');
+    const draw = () => pick.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.id === pid));
+    list.forEach(p => { const t = btn(p.name.replace(/\n/g, ' '), 'tab', () => { pid = p.id; draw(); }); t.dataset.id = p.id; pick.append(t); });
+    draw();
+    const row2 = el('div', 'fmtrow'); row2.style.marginTop = '8px';
+    const pname = () => { const p = list.find(s => s.id === pid); return [p, `稼働予定_${p.name.replace(/\n/g, '')}_${y}年${m}月`]; };
+    row2.append(
+      btn('PDF', 'btn', () => { const [p, nm] = pname(); run1(() => deliver(canvasToPdf([drawPersonPage(ym, p)]), nm + '.pdf'), 'PDFを作成しました'); }),
+      btn('画像(JPEG)', 'btn', () => { const [p, nm] = pname(); run1(async () => deliver(await canvasToJpeg(drawPersonPage(ym, p).cv), nm + '.jpg'), '画像を作成しました'); }));
+    const hint = el('p', 'hint', '表示中の月を書き出します。スマホでは保存先や送り先（LINE・メールなど）を選ぶ画面が出ます。管理者メモは含まれません。');
+    body.append(s1, row1, s2, pick, row2, hint);
   });
 }
 
