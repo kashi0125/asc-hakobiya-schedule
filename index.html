@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>稼働予定表</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#0b7fc0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="稼働予定表">
 <style>
 :root{
   --bg:#f6f4f1;--surface:#fff;--text:#1d1d1f;--muted:#6b6b70;--line:#d4d1cc;--accent:#0b7fc0;
@@ -151,11 +158,24 @@ textarea,input[type=text]{width:100%;font:inherit;font-size:16px;padding:8px;bor
 .checks{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:10px 0}
 .checks label{display:flex;align-items:center;gap:5px;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:7px 6px;white-space:nowrap}
 .checks{max-height:45dvh;overflow:auto}
+.install{display:flex;align-items:center;gap:10px;background:#0b7fc0;color:#fff;padding:8px 12px;font-size:13px;line-height:1.4}
+.install[hidden]{display:none}
+.install img{width:36px;height:36px;border-radius:8px;flex:0 0 auto}
+.install .itext{flex:1;min-width:0}
+.install .itext b{display:block;font-size:14px}
+.install .ibtn{background:#fff;color:#0b7fc0;border:none;border-radius:999px;padding:7px 14px;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap}
+.install .iclose{background:none;border:none;color:#fff;font-size:20px;line-height:1;padding:4px 2px;cursor:pointer}
 .toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:#333;color:#fff;padding:8px 16px;border-radius:999px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:20;max-width:90vw}
 .toast.show{opacity:1}
 </style>
 </head>
 <body>
+<div id="install" class="install" hidden>
+  <img src="icon-192.png" alt="">
+  <div class="itext"><b>ホーム画面に追加できます</b><span id="installMsg">アイコンからすぐに開けます</span></div>
+  <button class="ibtn" id="installBtn" type="button">追加</button>
+  <button class="iclose" id="installClose" type="button" aria-label="閉じる">×</button>
+</div>
 <div id="demo" class="demo" hidden>デモモード（Firebase未設定）：データはこの端末の中だけに保存されます。</div>
 <header>
   <div class="title-row"><h1 id="title">稼働予定表</h1><span id="updated" class="updated"></span></div>
@@ -1037,12 +1057,59 @@ $('#prev').onclick = () => { state.ym = shiftYm(state.ym, -1); watchMonth(); };
 $('#next').onclick = () => { state.ym = shiftYm(state.ym, 1); watchMonth(); };
 $('#thisMonth').onclick = () => { state.ym = ymOf(new Date()); scrolledFor = null; watchMonth(); };
 
+/* ===================== ホーム画面に追加（アイコン） ===================== */
+(() => {
+  const KEY = 'kadou-install-dismissed';
+  const bar = $('#install'), msg = $('#installMsg'), addBtn = $('#installBtn');
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  let dismissed = false;
+  try { dismissed = Date.now() - Number(localStorage.getItem(KEY) || 0) < 14 * 864e5; } catch (e) {}  // 閉じたら2週間は出さない
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW', e));
+  }
+  if (standalone) return;   // すでにアイコンから開いている
+  $('#installClose').onclick = () => { bar.hidden = true; try { localStorage.setItem(KEY, String(Date.now())); } catch (e) {} };
+
+  // Android（Chromeなど）：その場でインストール
+  let deferred = null;
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault(); deferred = e;
+    if (dismissed) return;
+    msg.textContent = 'アイコンからすぐに開けます';
+    addBtn.textContent = '追加'; addBtn.hidden = false;
+    bar.hidden = false;
+  });
+  addBtn.onclick = async () => {
+    if (!deferred) return;
+    deferred.prompt();
+    const r = await deferred.userChoice.catch(() => null);
+    deferred = null; bar.hidden = true;
+    if (r && r.outcome === 'accepted') toast('ホーム画面に追加しました');
+  };
+  window.addEventListener('appinstalled', () => { bar.hidden = true; });
+
+  // iPhone / iPad（Safari）：手順を案内
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (ios && !dismissed) {
+    msg.textContent = 'Safariの共有ボタン（□↑）→「ホーム画面に追加」';
+    addBtn.hidden = true;
+    bar.hidden = false;
+  }
+})();
+
 /* ===================== 起動 ===================== */
 (async () => {
   try {
     store = firebaseConfig.apiKey ? await createFirebaseStore() : createDemoStore();
   } catch (e) {
-    console.error(e); toast('Firebaseに接続できませんでした'); store = createDemoStore();
+    // 本番では架空のデモデータを出さず、通信エラーとして案内する
+    console.error(e);
+    const box = el('div', 'pempty');
+    box.append(el('p', '', '通信できないため、予定を読み込めませんでした。'),
+               el('p', '', '電波の良いところで、もう一度開いてください。'),
+               btn('再読み込み', 'btn primary', () => location.reload()));
+    $('#wrap').replaceChildren(box); $('#tabs').hidden = true;
+    return;
   }
   $('#demo').hidden = !store.demo;
   store.subscribeSettings(s => { state.settings = s ? { ...DEFAULT_SETTINGS, ...s } : DEFAULT_SETTINGS; render(); });
