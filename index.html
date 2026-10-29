@@ -24,6 +24,7 @@
   --off-bg:#fbe4d5;--off-tx:#5b2a12;     /* 休 */
   --sat-bg:#deeaf6;--sun-bg:#fbe4d5;--today:#ff7a00;
   --memo-bg:#fffbea;--demo-bg:#fff3cd;--demo-tx:#5c4400;
+  --notice-bg:#fff6cc;--notice-line:#f2d675;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#151517;--surface:#1f1f22;--text:#ececef;--muted:#9a9aa2;--line:#3a3a40;--accent:#3aa6e6;
@@ -32,6 +33,7 @@
   --raku-bg:#5a2a82;--raku-tx:#fff;--free-bg:#13804a;--free-tx:#fff;
   --off-bg:#5a3a2b;--off-tx:#ffe6d6;
   --sat-bg:#1c2a44;--sun-bg:#4a2e22;--memo-bg:#2b2818;--demo-bg:#4a3c10;--demo-tx:#ffe9a8;
+  --notice-bg:#3a3214;--notice-line:#6b5a1e;
 }}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
@@ -47,6 +49,9 @@ h1{font-size:18px;margin:0}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn.danger{color:#d23b3b}
 .notice{margin:8px 0 0;font-size:13px;white-space:pre-wrap}
+.notice.has{display:grid;grid-template-columns:auto 1fr;gap:6px;align-items:start;background:var(--notice-bg);border:1px solid var(--notice-line);border-radius:8px;padding:7px 10px;line-height:1.5}
+.notice .nicon{font-size:16px;line-height:1.25}
+.notice.has.editable::after{grid-column:1/-1}
 .notice:empty{display:none}
 .notice.editable{cursor:pointer;border:1px dashed var(--line);border-radius:8px;padding:6px 8px}
 .notice.editable::after{content:"✎ 編集（全月共通）";display:block;font-size:11px;color:var(--muted);margin-top:2px}
@@ -217,7 +222,7 @@ const firebaseConfig = {
 // 編集できる管理者のGoogleアカウント（firestore.rules にも同じものを書く）
 const ADMIN_EMAILS = ["kashi0125@gmail.com"];
 
-// 色分け（Excelの条件付き書式と同じ。上にあるものが優先）
+// 色分け（違う色の言葉が同じ枠に入っているときは色なし）
 const COLOR_RULES = [
   ['東大阪', 'k-east'], ['休', 'k-off'],
   ['西大阪', 'k-west'], ['淀川', 'k-yodo'], ['北大阪', 'k-work'],
@@ -246,12 +251,16 @@ const shiftYm = (ym, delta) => { const [y, m] = ym.split('-').map(Number); retur
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 function btn(text, cls, onclick) { const b = el('button', cls || 'btn', text); b.type = 'button'; b.onclick = onclick; return b; }
 
+// 当てはまる色が1種類だけなら、その色。違う色の言葉が同じ枠に混ざっていたら色なし
 function colorClass(v) {
   if (!v) return '';
-  for (const [kw, cls] of COLOR_RULES) if (v.includes(kw)) return cls;
+  const hits = new Set(COLOR_RULES.filter(([kw]) => v.includes(kw)).map(([, cls]) => cls));
+  if (hits.size === 1) return [...hits][0];
+  if (hits.size > 1) return '';
   return /不可/.test(v) ? 'k-ng' : '';
 }
-const isOff = v => !!v && v.includes('休');   // Excelの COUNTIF(…,"*休*") と同じ数え方
+// 休みとして数えるのは、休みの色になる枠だけ（「休」を含み、ほかの色の言葉が混ざっていない）
+const isOff = v => colorClass(v) === 'k-off';
 
 function fillCell(node, v) {
   node.replaceChildren();
@@ -531,7 +540,8 @@ function renderPerson(p) {
     if (!v) continue;
     if (isOff(v)) off++; else work++;
     const k = colorClass(v);
-    if (k && !used.has(k)) used.set(k, isOff(v) ? '休み' : v.split('\n')[0]);
+    const LEG = { 'k-work': '北大阪', 'k-yodo': '淀川', 'k-west': '西大阪', 'k-east': '東大阪', 'k-off': '休み', 'k-ng': '不可' };
+    if (k && !used.has(k)) used.set(k, LEG[k] || v.split('\n')[0]);
   }
 
   const head = el('div', 'phead');
@@ -575,7 +585,10 @@ function renderHeader() {
   document.title = APP_TITLE;
   $('#ym').textContent = `${y}年${m}月`;
   const nt = $('#notice'), admin = isAdmin();
-  nt.textContent = state.settings.notice || (admin ? '（お知らせなし：タップして入力）' : '');
+  const text = (state.settings.notice || '').trim();
+  nt.classList.toggle('has', !!text);
+  if (text) nt.replaceChildren(el('span', 'nicon', '📣'), el('span', 'ntext', text));
+  else nt.textContent = admin ? '（お知らせなし：タップして入力）' : '';
   nt.classList.toggle('editable', admin);
   nt.title = admin ? 'タップして編集（全月共通）' : '';
   const u = state.month.updatedAt;
