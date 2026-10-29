@@ -44,7 +44,9 @@ header{padding:10px 12px 8px;background:var(--surface);border-bottom:1px solid v
 h1{font-size:18px;margin:0}
 .updated{font-size:12px;color:var(--muted)}
 .nav{display:flex;align-items:center;gap:6px;margin-top:8px}
-.nav .ym{font-size:17px;font-weight:700;min-width:7.2em;text-align:center}
+.nav .ym{font-size:17px;font-weight:700;min-width:7.2em;text-align:center;padding:4px 0}
+.nav .ym.cur{box-shadow:inset 4px 0 0 var(--today)}
+#thisMonth:disabled{opacity:.4;cursor:default}
 .btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:6px 12px;min-height:36px;cursor:pointer}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn.danger{color:#d23b3b}
@@ -609,6 +611,9 @@ function renderHeader() {
   $('#title').textContent = APP_TITLE;
   document.title = APP_TITLE;
   $('#ym').textContent = `${y}年${m}月`;
+  const isCur = state.ym === ymOf(new Date());
+  $('#ym').classList.toggle('cur', isCur);
+  $('#thisMonth').disabled = isCur;
   const nt = $('#notice'), admin = isAdmin();
   const list = notices();
   nt.classList.toggle('has', list.length > 0);
