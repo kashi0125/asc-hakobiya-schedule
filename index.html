@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>稼働予定表</title>
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js">
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js">
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="theme-color" content="#0b7fc0">
@@ -699,7 +704,7 @@ function renderFooter() {
   const f = $('#footer'); f.replaceChildren();
   f.classList.toggle('admin', isAdmin());
   if (!state.user) {
-    f.append(btn('書き出し', 'btn', openExport), btn('アプリを教える', 'btn', openShareCard), el('span', 'grow', ''), btn('管理者ログイン', 'linkbtn', () => store.login().catch(e => toast('ログインできませんでした（' + (e.code || e.message) + '）'))));
+    f.append(btn('書き出し', 'btn', openExport), btn('アプリを教える', 'btn', openShareCard), el('span', 'grow', ''), btn('管理者ログイン', 'linkbtn', () => store && store.login().catch(e => toast('ログインできませんでした（' + (e.code || e.message) + '）'))));
   } else if (isAdmin()) {
     const ub = btn(`↶ 元に戻す${undoStack.length ? `（${undoStack.length}）` : ''}`, 'btn', undoLast);
     ub.disabled = !undoStack.length;
@@ -1345,14 +1350,34 @@ $('#grid').addEventListener('click', e => {
 function watchMemo() {
   if (unsubMemo) { unsubMemo(); unsubMemo = null; }
   state.memos = {};
-  if (isAdmin()) unsubMemo = store.subscribeMemo(state.ym, d => { state.memos = (d && d.memos) || {}; render(); });
+  if (isAdmin() && store) unsubMemo = store.subscribeMemo(state.ym, d => { state.memos = (d && d.memos) || {}; render(); });
 }
+/* 前回表示したデータを端末に保存し、次に開いたときすぐ表示する（最新データが届いたら差し替え） */
+const DATA_CACHE = 'kadou-data-cache-v1';
+function cacheRead() { try { return JSON.parse(localStorage.getItem(DATA_CACHE) || '{}') || {}; } catch (e) { return {}; } }
+function cacheWrite(fn) {
+  if (store && store.demo) return;
+  try {
+    const c = cacheRead(); fn(c);
+    const keys = Object.keys(c.months || {}).sort();
+    while (keys.length > 6) delete c.months[keys.shift()];   // 直近6か月分だけ
+    localStorage.setItem(DATA_CACHE, JSON.stringify(c));
+  } catch (e) {}
+}
+const cachedMonth = ym => { const c = cacheRead(); return (c.months && c.months[ym]) || null; };
+
 function watchMonth() {
-  if (unsubMonth) unsubMonth();
-  state.month = {};
+  if (unsubMonth) { unsubMonth(); unsubMonth = null; }
+  const ym = state.ym, cached = cachedMonth(ym);
+  state.month = cached || {};
   setHash();
   render();
-  unsubMonth = store.subscribeMonth(state.ym, data => { state.month = data || {}; render(); scrollToTodayOnce(); });
+  if (cached) scrollToTodayOnce();
+  if (!store) return;   // 起動直後（部品の読み込み中）は保存データだけ表示
+  unsubMonth = store.subscribeMonth(ym, data => {
+    state.month = data || {}; render(); scrollToTodayOnce();
+    cacheWrite(c => { c.months = c.months || {}; c.months[ym] = state.month; });
+  });
   watchMemo();
 }
 $('#prev').onclick = () => { state.ym = shiftYm(state.ym, -1); watchMonth(); };
@@ -1401,6 +1426,11 @@ $('#thisMonth').onclick = () => { state.ym = ymOf(new Date()); scrolledFor = nul
 
 /* ===================== 起動 ===================== */
 (async () => {
+  if (firebaseConfig.apiKey) {   // 前回のデータで先に表示
+    const c = cacheRead();
+    if (c.settings) state.settings = { ...DEFAULT_SETTINGS, ...c.settings };
+    watchMonth();
+  }
   try {
     store = firebaseConfig.apiKey ? await createFirebaseStore() : createDemoStore();
   } catch (e) {
@@ -1414,7 +1444,7 @@ $('#thisMonth').onclick = () => { state.ym = ymOf(new Date()); scrolledFor = nul
     return;
   }
   $('#demo').hidden = !store.demo;
-  store.subscribeSettings(s => { state.settings = s ? { ...DEFAULT_SETTINGS, ...s } : DEFAULT_SETTINGS; render(); });
+  store.subscribeSettings(s => { state.settings = s ? { ...DEFAULT_SETTINGS, ...s } : DEFAULT_SETTINGS; render(); cacheWrite(c => { c.settings = s || null; }); });
   watchMonth();
   store.onAuth(u => { state.user = u; if (!u) undoStack.length = 0; watchMemo(); render(); });
 })();
